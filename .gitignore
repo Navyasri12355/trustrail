@@ -19,6 +19,9 @@ env/
 *.db
 *.sqlite3
 
+# Docker
+pgdata/
+
 # Node / Frontend
 node_modules/
 frontend/dist/

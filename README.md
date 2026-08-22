@@ -65,7 +65,7 @@ AI buyer agent
 | Payment executor (Razorpay)      | `backend/routes/pay.py`         | 09    |
 | UCP adapter                      | `backend/adapters/ucp.py`       | 10    |
 | AP2 adapter                      | `backend/adapters/ap2.py`       | 11    |
-| UAP-ready stub                   | `backend/adapters/uap_ready.py` | 12    |
+| UAP adapter (Ed25519 stand-in)       | `backend/adapters/uap_ready.py` | 12    |
 | Adversarial test harness         | `agent/harness.py`              | 13    |
 | Reviewer dashboard (React)       | `frontend/src/App.jsx`          | 14    |
 
@@ -100,7 +100,46 @@ All 7 rules are evaluated on every request — no short-circuit — so the audit
 
 ---
 
-## How to Run
+## Docker (Postgres + full stack)
+
+The fastest way to run TrustRail with a real database:
+
+```bash
+# 1. Copy and edit .env
+copy .env.example .env        # Windows
+# cp .env.example .env         # macOS/Linux
+
+# 2. Fill in .env:
+#    RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+#    ED25519_PRIVATE_KEY_HEX, ED25519_PUBLIC_KEY_HEX  (generate below)
+#    POSTGRES_PASSWORD  (pick any secure string)
+
+# 3. Generate Ed25519 keypair (first time only — run BEFORE compose up)
+python -m venv .venv
+.venv\Scripts\pip install pynacl python-dotenv
+.venv\Scripts\python -m backend.crypto.keys
+# Copy the printed hex values into .env
+
+# 4. Start everything
+docker compose up --build
+```
+
+| URL | Service |
+|---|---|
+| http://localhost:8000/docs | FastAPI interactive docs |
+| http://localhost:5173 | Reviewer dashboard |
+| localhost:5432 | Postgres (connect with psql / DBeaver) |
+
+**Stopping / resetting:**
+
+```bash
+docker compose down          # stop, keep DB volume
+docker compose down -v       # stop AND wipe the Postgres volume
+```
+
+---
+
+## How to Run (local, no Docker)
 
 ### Prerequisites
 
@@ -192,10 +231,10 @@ Dashboard: http://localhost:5173
 | Limitation           | Detail                                                                                                                                                                         |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Test-mode only       | All Razorpay calls use test-mode APIs. No real money, no real users.                                                                                                           |
-| No UAP spec          | UAP adapter is a documented stub. Every UAP field is labeled CONFIRMED or ANTICIPATED in `docs/uap-mapping.md`.                                                                |
+| No UAP spec          | UAP token verification uses Ed25519 as a stand-in (same caveat as AP2). The adapter runs the full guardrail + Razorpay order on ALLOW. Replace `_verify_uap_token()` in `uap_ready.py` with NPCI's actual scheme when the spec ships. Every UAP field labeled CONFIRMED or ANTICIPATED in `docs/uap-mapping.md`. |
 | AP2 proof stand-in   | AP2 uses W3C Verifiable Credentials; TrustRail uses Ed25519 as a stand-in. Replacing `verify_signature()` in `ap2.py` with a VC verifier is the only production change needed. |
 | Single merchant demo | The demo uses one hardcoded merchant (`mrc_demo_001`). Multi-tenant is architecturally straightforward.                                                                        |
-| SQLite               | Dev uses SQLite. Switch `DATABASE_URL` in `.env` to a Postgres URI for production.                                                                                             |
+| SQLite               | Default for local dev. Docker Compose uses Postgres 16 out of the box — see the Docker section above. |
 
 ---
 

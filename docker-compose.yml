@@ -1,0 +1,76 @@
+version: "3.9"
+
+# ── TrustRail Docker Compose ──────────────────────────────────────────────────
+# Usage:
+#   1. Copy .env.example → .env and fill in all values (see README § Docker)
+#   2. docker compose up --build
+#
+# Services:
+#   db       — PostgreSQL 16 with a named volume (data persists across restarts)
+#   backend  — FastAPI / uvicorn (waits for db to be healthy)
+#   frontend — Vite dev server (proxies /api → backend)
+#
+# After startup:
+#   API docs:  http://localhost:8000/docs
+#   Dashboard: http://localhost:5173
+
+services:
+
+  # ── Postgres ────────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: trustrail_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-trustrail}
+      POSTGRES_USER:     ${POSTGRES_USER:-trustrail}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"       # exposed so you can connect with psql / DBeaver locally
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trustrail} -d ${POSTGRES_DB:-trustrail}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Backend (FastAPI) ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: trustrail_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override the DATABASE_URL to point at the postgres service
+      DATABASE_URL: postgresql://${POSTGRES_USER:-trustrail}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-trustrail}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Hot-reload: mount source so code changes are reflected without rebuild
+      - ./backend:/app/backend:ro
+      - ./agent:/app/agent:ro
+
+  # ── Frontend (Vite) ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: trustrail_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src:ro   # hot-reload via bind mount
+
+volumes:
+  postgres_data:
+    driver: local

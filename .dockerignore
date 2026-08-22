@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Database (don't bake the SQLite file into the image)
+*.db
+*.sqlite3
+
+# Environment (secrets never go in images)
+.env
+*.env.local
+
+# Node / Frontend (backend image doesn't need these)
+frontend/node_modules/
+frontend/dist/
+
+# Tests / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
