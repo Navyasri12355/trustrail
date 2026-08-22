@@ -1,0 +1,227 @@
+{
+  "project": "TrustRail",
+  "branchName": "trustrail-buildathon",
+  "description": "Protocol-agnostic mandate & guardrail layer for agentic commerce — Razorpay AI Buildathon Track 01",
+  "stack": {
+    "backend": "FastAPI + Python",
+    "database": "SQLite (dev) / Postgres (prod-ready)",
+    "frontend": "React + Vite",
+    "payments": "Razorpay test-mode (Orders API + Payment Links)",
+    "crypto": "Ed25519 via PyNaCl",
+    "agent_harness": "Claude/GPT API scripted scenarios"
+  },
+  "userStories": [
+    {
+      "id": "story-01",
+      "week": 1,
+      "title": "Project scaffold & repo init",
+      "description": "Initialize the monorepo folder structure: backend/ (FastAPI), frontend/ (React/Vite), agent/ (test harness). Add requirements.txt, .env.example, .gitignore, and a root README skeleton.",
+      "acceptanceCriteria": [
+        "backend/ has a runnable FastAPI app on port 8000 returning {status: ok} at GET /health",
+        "frontend/ has a Vite+React app scaffolded",
+        "agent/ folder exists with a placeholder script",
+        ".env.example documents all required env vars",
+        ".gitignore covers Python, Node, and .env"
+      ],
+      "passes": false,
+      "priority": 1
+    },
+    {
+      "id": "story-02",
+      "week": 1,
+      "title": "Merchant UCP manifest endpoint",
+      "description": "Serve a UCP-style agent-discoverable catalog at GET /.well-known/ucp. The manifest lists available product categories, merchant metadata, and TrustRail capability flags (mandate_required: true).",
+      "acceptanceCriteria": [
+        "GET /.well-known/ucp returns valid JSON with merchant name, allowed categories, and mandate_required: true",
+        "Categories include at least: groceries, household, electronics",
+        "Endpoint is CORS-enabled for agent access"
+      ],
+      "passes": false,
+      "priority": 2
+    },
+    {
+      "id": "story-03",
+      "week": 1,
+      "title": "Mandate schema + database setup",
+      "description": "Define the SQLite DB schema for mandates and audit_log tables. Mandate schema matches Section 6.2 of the PRD (mandate_id, issuer_user_id, agent_id, merchant_id, scope JSON, issued_at, expires_at, revoked, signature, protocol_origin). Use SQLAlchemy ORM.",
+      "acceptanceCriteria": [
+        "Running `python -m backend.db.init` creates the DB and both tables",
+        "Mandate model has all fields from PRD Section 6.2",
+        "audit_log table has: id, mandate_id, event_type, decision, rules_checked JSON, reason, created_at, prev_hash (for hash-chaining)"
+      ],
+      "passes": false,
+      "priority": 3
+    },
+    {
+      "id": "story-04",
+      "week": 2,
+      "title": "Mandate issuance API",
+      "description": "POST /mandates creates a new mandate. Generates a mandate_id (mnd_ prefix + UUID), signs the mandate payload with Ed25519 (server keypair stored in .env), saves to DB, returns the signed mandate JSON.",
+      "acceptanceCriteria": [
+        "POST /mandates with valid body returns 201 with mandate JSON including signature field",
+        "Signature is valid Ed25519 over the mandate payload (excluding signature field)",
+        "mandate_id starts with mnd_",
+        "Mandate is persisted to DB"
+      ],
+      "passes": false,
+      "priority": 4
+    },
+    {
+      "id": "story-05",
+      "week": 2,
+      "title": "Mandate revocation API",
+      "description": "DELETE /mandates/:mandate_id sets revoked=true on the mandate. Returns 200 on success, 404 if not found.",
+      "acceptanceCriteria": [
+        "DELETE /mandates/:id sets revoked=true in DB",
+        "Subsequent guardrail checks on a revoked mandate return BLOCK with reason revoked",
+        "Returns 404 for unknown mandate_id"
+      ],
+      "passes": false,
+      "priority": 5
+    },
+    {
+      "id": "story-06",
+      "week": 2,
+      "title": "Guardrail engine — signature, expiry, category rules",
+      "description": "Build the core guardrail module (backend/guardrail/engine.py) as a pure Python module with no DB/API dependencies. Implement rules 1–3 from PRD Section 6.3: signature validation, expiry/revocation check, category scope check. Each rule returns a RuleResult(passed: bool, rule: str, reason: str).",
+      "acceptanceCriteria": [
+        "engine.validate_mandate(mandate, request) returns a GuardrailDecision(allowed: bool, rules: list[RuleResult])",
+        "Rule 1: invalid signature → BLOCK invalid_signature",
+        "Rule 2: expired mandate → BLOCK expired; revoked → BLOCK revoked",
+        "Rule 3: category not in allowed_categories → BLOCK out_of_scope_category",
+        "All rules evaluated even if one fails (no short-circuit)",
+        "Unit tests for all 3 rules passing and failing cases"
+      ],
+      "passes": false,
+      "priority": 6
+    },
+    {
+      "id": "story-07",
+      "week": 2,
+      "title": "Guardrail engine — spend cap and replay rules",
+      "description": "Add rules 4–7 to the guardrail engine: per-transaction cap, rolling 7-day cap (requires DB lookup for spend sum), replay detection (nonce uniqueness), and the ALLOW path that returns a signed execution token.",
+      "acceptanceCriteria": [
+        "Rule 4: amount > max_per_transaction → BLOCK exceeds_transaction_cap",
+        "Rule 5: trailing 7d spend + requested amount > max_rolling_7d → BLOCK exceeds_rolling_cap",
+        "Rule 6: nonce already seen for this mandate → BLOCK replay_detected",
+        "Rule 7: all pass → ALLOW, returns signed execution_token",
+        "Unit tests for all 4 rules"
+      ],
+      "passes": false,
+      "priority": 7
+    },
+    {
+      "id": "story-08",
+      "week": 2,
+      "title": "Hash-chained audit log writer",
+      "description": "Every guardrail decision (ALLOW or BLOCK) is appended to the audit_log table. Each row includes a SHA-256 hash of the previous row's hash + current row data (hash chaining for tamper-evidence). Expose GET /audit-log endpoint returning the full log.",
+      "acceptanceCriteria": [
+        "Every call to the guardrail engine appends a row to audit_log",
+        "Each row's hash = SHA256(prev_hash + mandate_id + decision + timestamp)",
+        "First row uses hash of empty string as prev_hash",
+        "GET /audit-log returns all rows in order with all fields"
+      ],
+      "passes": false,
+      "priority": 8
+    },
+    {
+      "id": "story-09",
+      "week": 2,
+      "title": "Razorpay happy path integration",
+      "description": "POST /pay endpoint: accepts a payment request (mandate_id, amount, category, nonce), runs guardrail engine, if ALLOW calls Razorpay test-mode Orders API to create an order, logs to audit trail, returns order details. If BLOCK, returns structured refusal.",
+      "acceptanceCriteria": [
+        "POST /pay with valid mandate returns 200 with Razorpay order_id",
+        "POST /pay with invalid mandate returns 402 with block reason and full rules checklist",
+        "Razorpay API key loaded from RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET env vars",
+        "Every /pay call — allowed or blocked — is logged to audit_log"
+      ],
+      "passes": false,
+      "priority": 9
+    },
+    {
+      "id": "story-10",
+      "week": 3,
+      "title": "UCP protocol adapter",
+      "description": "Build backend/adapters/ucp.py: maps an incoming UCP-style checkout call (with catalog item reference and buyer agent ID) into the internal Mandate Request format. Wire it to a POST /adapters/ucp/checkout endpoint.",
+      "acceptanceCriteria": [
+        "POST /adapters/ucp/checkout accepts UCP-shaped payload and normalizes to internal MandateRequest",
+        "Normalized request flows through guardrail engine and returns UCP-compatible response",
+        "Adapter is isolated — only converts shapes, no business logic"
+      ],
+      "passes": false,
+      "priority": 10
+    },
+    {
+      "id": "story-11",
+      "week": 3,
+      "title": "AP2 protocol adapter",
+      "description": "Build backend/adapters/ap2.py: accepts AP2-style signed mandate/intent objects, verifies the AP2 signature scheme, maps fields into the internal mandate schema. Wire to POST /adapters/ap2/intent.",
+      "acceptanceCriteria": [
+        "POST /adapters/ap2/intent accepts AP2-shaped payload",
+        "Signature verification step is present (even if using our own Ed25519 as a stand-in for AP2's VC scheme)",
+        "Maps to internal MandateRequest and flows through guardrail",
+        "Protocol_origin field set to ap2 in mandate"
+      ],
+      "passes": false,
+      "priority": 11
+    },
+    {
+      "id": "story-12",
+      "week": 3,
+      "title": "UAP-ready stub adapter + mapping doc",
+      "description": "Build backend/adapters/uap_ready.py as a documented stub. Write docs/uap-mapping.md: a table mapping UAP reported concepts (delegation, spend limits, agent registry, human-reviewable logs) to TrustRail internal fields. Be explicit about what is confirmed vs anticipated.",
+      "acceptanceCriteria": [
+        "backend/adapters/uap_ready.py exists with clearly documented TODO markers and field mapping comments",
+        "docs/uap-mapping.md contains the protocol comparison table for all 3 protocols (UCP, AP2, UAP)",
+        "Document explicitly labels each UAP field as confirmed or anticipated"
+      ],
+      "passes": false,
+      "priority": 12
+    },
+    {
+      "id": "story-13",
+      "week": 3,
+      "title": "AI buyer agent test harness — happy path + adversarial scenarios",
+      "description": "Build agent/harness.py: a scripted agent that runs all 7 adversarial scenarios from PRD Section 10 against the live backend. Each scenario prints PASS/FAIL with the actual vs expected guardrail decision.",
+      "acceptanceCriteria": [
+        "All 7 scenarios from PRD Section 10 are implemented",
+        "Scenario 1 (happy path) → ALLOW",
+        "Scenarios 2–6 → BLOCK with correct violation reason",
+        "Scenario 7 (prompt injection in catalog) → BLOCK (rule-based, not LLM-persuadable)",
+        "Script outputs a summary table: scenario, expected, actual, pass/fail"
+      ],
+      "passes": false,
+      "priority": 13
+    },
+    {
+      "id": "story-14",
+      "week": 3,
+      "title": "Reviewer dashboard — audit trail + metrics",
+      "description": "Build the React frontend dashboard: a timeline view of all audit log entries (mandate_id, decision, reason, timestamp), a block-rate metric card (% blocked vs allowed), and a Revoke Mandate button that calls DELETE /mandates/:id.",
+      "acceptanceCriteria": [
+        "Dashboard fetches and displays GET /audit-log entries in a timeline",
+        "Block rate metric (blocked / total) shown as a percentage card",
+        "Each audit entry shows: mandate_id, decision (ALLOW/BLOCK badge), reason, timestamp",
+        "Revoke button calls DELETE /mandates/:id and refreshes the log",
+        "Verify in browser that all 3 elements render correctly"
+      ],
+      "passes": false,
+      "priority": 14
+    },
+    {
+      "id": "story-15",
+      "week": 4,
+      "title": "Metrics batch run + README",
+      "description": "Run the full test batch: ≥20 happy-path runs + all 7 adversarial cases. Capture metrics from PRD Section 9. Write the final README with architecture diagram, protocol comparison table link, how-to-run instructions, and honest limitations section.",
+      "acceptanceCriteria": [
+        "100% of executed test-mode payments traceable to a valid mandate",
+        "≥4 adversarial scenarios blocked with correct violation reason",
+        "Guardrail validation latency measured and documented (target <300ms)",
+        "Zero false-blocks on the 20-run happy path batch",
+        "README has: architecture overview, how to run, protocol table link, limitations"
+      ],
+      "passes": false,
+      "priority": 15
+    }
+  ]
+}
