@@ -1,0 +1,162 @@
+================================================================================
+TRUSTRAIL — BUILD PROGRESS LOG
+Razorpay AI Buildathon | Track 01: AI Growth & Agentic Commerce
+================================================================================
+
+PROJECT GOAL:
+  Protocol-agnostic mandate & guardrail layer for agentic commerce.
+  Demonstrates: mandate issuance → guardrail enforcement → Razorpay test-mode
+  execution → immutable audit trail → human reviewer dashboard.
+
+TECH STACK:
+  Backend  : FastAPI + Python 3.11+
+  DB       : SQLite (dev), Postgres-compatible via SQLAlchemy
+  Crypto   : Ed25519 via PyNaCl
+  Frontend : React + Vite
+  Payments : Razorpay test-mode (Orders API)
+  Adapters : UCP (real), AP2 (real), UAP-ready (documented stub)
+
+================================================================================
+ITERATION LOG
+================================================================================
+
+[2026-08-22] SESSION 1 — Stories 01–09 COMPLETE ✓
+  ✓ story-01 : Project scaffold (backend/, frontend/ Vite+React, agent/, .env, .gitignore)
+  ✓ story-02 : UCP manifest at GET /.well-known/ucp — 3 categories, mandate_required: true
+  ✓ story-03 : DB schema — mandates + audit_log tables (SQLAlchemy, SQLite)
+  ✓ story-04 : POST /mandates — Ed25519-signed mandate issuance (mnd_ prefix)
+  ✓ story-05 : DELETE /mandates/{id} — revocation sets revoked=True
+  ✓ story-06 : Guardrail rules 1–3 (signature, expiry, revocation, category scope)
+  ✓ story-07 : Guardrail rules 4–7 (per-tx cap, rolling 7d cap, replay, ALLOW token)
+  ✓ story-08 : Hash-chained audit log writer + GET /audit-log endpoint
+  ✓ story-09 : POST /pay — full guardrail→Razorpay Orders API flow
+
+  Server    : uvicorn backend.main:app --reload (port 8000) ✓
+
+[2026-08-22] SESSION 2 — Stories 10–15 COMPLETE ✓
+  ✓ story-10 : POST /adapters/ucp/checkout — UCP shape → guardrail → Razorpay
+  ✓ story-11 : POST /adapters/ap2/intent  — AP2 VC proof → guardrail → Razorpay
+  ✓ story-12 : POST /adapters/uap/intent  — Documented stub + docs/uap-mapping.md
+  ✓ story-13 : agent/harness.py — all 7 adversarial scenarios with colored summary
+  ✓ story-14 : React dashboard — audit timeline, metrics, revoke, hash chain, auto-refresh
+  ✓ story-15 : README.md — architecture, how-to-run, adversarial table, limitations
+
+  Frontend  : Vite dev server at http://localhost:5173 ✓
+  Status    : ALL 15 STORIES COMPLETE — submission ready
+
+================================================================================
+PATTERNS & GOTCHAS (discovered during build)
+================================================================================
+
+  ── WINDOWS / POWERSHELL ──────────────────────────────────────────────────────
+
+  [GOTCHA] PowerShell does NOT support && as a command separator.
+           Use semicolons: `cmd1; cmd2`   (not `cmd1 && cmd2`)
+           This broke the initial venv+pip one-liner.
+
+  [GOTCHA] SQLite path in DATABASE_URL is relative to where uvicorn is launched.
+           Always launch from project root: trustrail.db ends up there.
+           If you cd into backend/ before running, the DB file moves — mandates
+           and audit log from previous sessions will vanish.
+
+  ── CRYPTO ────────────────────────────────────────────────────────────────────
+
+  [PATTERN] Ed25519 signable payload MUST be identical between issuance
+            (routes/mandates.py::_build_signable_payload) and verification
+            (guardrail/engine.py::_build_signable_payload).
+            Key rule: sort_keys=True, separators=(",", ":"), no signature field.
+            Any drift between these two functions = rule 1 always fails (invalid_signature).
+
+  [GOTCHA] PyNaCl's SigningKey.sign() returns a SignedMessage object.
+           The raw 64-byte signature is signed.signature — NOT signed itself.
+           signed.hex() would encode the message+signature concatenated, which
+           is 32 extra bytes and will always fail verification.
+
+  [PATTERN] Keypair lives in .env — never in code.
+            Run `python -m backend.crypto.keys` once to generate fresh keys.
+            Regenerating keys invalidates ALL previously issued mandates
+            (their signatures will fail rule 1).
+
+  ── DATABASE / SQLALCHEMY ─────────────────────────────────────────────────────
+
+  [PATTERN] allowed_categories is stored as a JSON string in SQLite
+            (TEXT column, json.dumps on write, json.loads on read).
+            SQLite has no native array type. Postgres ARRAY could replace this
+            but TEXT is portable and works fine for this scope.
+
+  [PATTERN] audit_log.amount is nullable — mandate_issued / mandate_revoked
+            events have no amount. Always check `if entry.amount` before
+            arithmetic in the frontend.
+
+  [GOTCHA] SQLAlchemy sessions are NOT thread-safe. FastAPI's get_db() dependency
+           yields a fresh SessionLocal() per request and closes it in finally.
+           Do NOT share a module-level session — concurrent requests will corrupt it.
+
+  [PATTERN] Hash-chaining requires serialised writes — two concurrent guardrail
+            decisions could race and both read the same prev_hash.
+            At demo scale (single-process uvicorn) this is fine. For production,
+            use a DB-level row lock or a queue.
+
+  ── GUARDRAIL ENGINE ──────────────────────────────────────────────────────────
+
+  [PATTERN] Engine is pure Python — zero FastAPI/SQLAlchemy imports.
+            All stateful data (spent_7d, seen_nonces) is injected by the caller.
+            This keeps it unit-testable in isolation (no DB needed in tests).
+
+  [PATTERN] No short-circuit: all 7 rules always run.
+            The audit trail logs the full checklist even when rule 1 fails.
+            This is a deliberate PRD requirement — don't "optimise" it away.
+
+  [GOTCHA] Rule 5 (rolling cap) reads approved spend from audit_log, NOT from a
+           separate spend table. This means: if a Razorpay call fails AFTER the
+           audit log write, the amount is still counted against the rolling cap.
+           For a demo this is fine (test-mode). For production, make the Razorpay
+           call first and write the audit log only on success.
+
+  [PATTERN] Scenario 7 (prompt injection) works because the guardrail evaluates
+           the category field from the HTTP request, NOT from any LLM output.
+           The agent can be "tricked" by the catalog, but the guardrail never
+           reads the catalog — it only reads the mandate rules.
+
+  ── ADAPTERS ──────────────────────────────────────────────────────────────────
+
+  [PATTERN] All three adapters (UCP, AP2, UAP-ready) share identical guardrail
+            + audit logic. The _get_spent_7d and _get_seen_nonces helpers are
+            duplicated across adapters and pay.py to avoid circular imports.
+            If this grows, extract to backend/guardrail/helpers.py.
+
+  [GOTCHA] AP2 adapter verifies the incoming credential proof against the
+           server's Ed25519 public key — meaning the test client must sign
+           with the SAME private key stored in .env. This is a stand-in for
+           W3C VC verification. Document this clearly in the README; judges
+           will ask about it.
+
+  [PATTERN] UAP stub: every field is labeled CONFIRMED or ANTICIPATED inline
+            in the code AND in docs/uap-mapping.md. Never claim UAP compliance.
+            The mapping doc is itself a submission asset — it shows protocol fluency.
+
+  ── RAZORPAY ──────────────────────────────────────────────────────────────────
+
+  [PATTERN] Razorpay amounts are in PAISE (INR × 100). Always: int(amount * 100).
+            Floats passed directly cause a Razorpay API validation error.
+
+  [GOTCHA] Razorpay test-mode keys start with rzp_test_. Live keys start with
+           rzp_live_. The SDK does not validate this — wrong key type just means
+           orders won't show up in the expected dashboard section.
+
+  ── FRONTEND ──────────────────────────────────────────────────────────────────
+
+  [PATTERN] Dashboard auto-refreshes every 10s via setInterval in useEffect.
+            The cleanup return (() => clearInterval(id)) is essential — without
+            it, every hot-reload in development stacks another interval.
+
+  [PATTERN] Audit log is fetched reversed (newest first) for the timeline view.
+            Hash chain integrity still reads chronologically — don't sort the
+            raw data before chain verification.
+
+  [GOTCHA] CORS is set to allow_origins=["*"] on the FastAPI backend.
+           Fine for a demo. For production, lock to the dashboard's actual origin.
+
+================================================================================
+
+================================================================================
