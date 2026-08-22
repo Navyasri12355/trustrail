@@ -38,7 +38,7 @@ app.include_router(pay_router)        # Story-09: POST /pay
 app.include_router(audit_router)      # Story-08: GET /audit-log
 app.include_router(ucp_router)        # Story-10: POST /adapters/ucp/checkout
 app.include_router(ap2_router)        # Story-11: POST /adapters/ap2/intent
-app.include_router(uap_router)        # Story-12: POST /adapters/uap/intent (stub)
+app.include_router(uap_router)        # Story-12: POST /adapters/uap/intent (functional, Ed25519 stand-in)
 
 
 @app.get("/health")

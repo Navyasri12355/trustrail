@@ -4,7 +4,13 @@
 > three agentic commerce protocols. UCP and AP2 are real, published (draft) specs.
 > UAP (NPCI Unified Agent Protocol) has **no public spec as of August 2026** —
 > every UAP row is derived from public reporting and industry sources, and is
-> labeled accordingly. This document is a design artifact, not a compliance claim.
+> labeled accordingly.
+>
+> The UAP adapter (`uap_ready.py`) is now **fully functional**: it runs the complete
+> 7-rule guardrail, creates Razorpay test-mode orders on ALLOW, and logs to the
+> hash-chained audit trail. Token signature verification uses the same Ed25519
+> stand-in as the AP2 adapter — documented explicitly; one function swap when
+> the NPCI spec ships. This document is a design artifact, not a compliance claim.
 
 ---
 
@@ -51,8 +57,13 @@
 - **Backed by:** NPCI (National Payments Corporation of India)
 - **Primary purpose:** Let AI agents transact over UPI on a user's behalf under RBI-approved delegation rules
 - **Mandate model:** Delegation token issued by NPCI, scoped to spend limits and categories
-- **TrustRail integration:** `uap_ready.py` stub maps UAP anticipated fields to TrustRail internal schema
+- **TrustRail integration:** `uap_ready.py` is a **working adapter** — runs all 7 guardrail rules, issues
+  Razorpay orders on ALLOW, and writes to the hash-chained audit trail
 - **Spec status:** **No public spec.** RBI approval pending as of August 2026.
+- **Token verification stand-in:** Ed25519 (same caveat as AP2). Replace `_verify_uap_token()` in
+  `uap_ready.py` with NPCI's actual scheme when the spec ships.
+- **Agent registry stand-in:** `agent_registry_id` is accepted as a plain string. In production,
+  validate against NPCI's registry API.
 - **Key reported requirements (CONFIRMED):** Spend/category limits, human-reviewable logs, dispute model, rolling window caps
 - **Key design elements (ANTICIPATED):** NPCI agent registry, token signature scheme, delegation ID format, VPA-based identity
 
