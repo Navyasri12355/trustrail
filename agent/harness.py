@@ -28,6 +28,11 @@ PASS  = "\033[92m✓ PASS\033[0m"
 FAIL  = "\033[91m✗ FAIL\033[0m"
 SEP   = "─" * 72
 
+# Multi-tenant: merchant ID for test harness
+# In production, this would be created via POST /merchants
+MERCHANT_ID = os.getenv("HARNESS_MERCHANT_ID", "mrc_demo_001")
+HEADERS = {"X-Merchant-ID": MERCHANT_ID}
+
 
 # ── Crypto helper (sign AP2-style intent for reuse in harness) ────────────────
 
@@ -62,7 +67,7 @@ def create_mandate(
     """Create a fresh mandate and return its mandate_id."""
     if categories is None:
         categories = ["groceries", "household"]
-    resp = requests.post(f"{BACKEND}/mandates", json={
+    resp = requests.post(f"{BACKEND}/mandates", headers=HEADERS, json={
         "issuer_user_id":  "usr_harness_001",
         "agent_id":        "agent_test_harness",
         "scope": {
@@ -82,7 +87,7 @@ def create_mandate(
 def pay(mandate_id: str, amount: float, category: str, nonce: str = None) -> dict:
     """Call POST /pay and return the full response JSON."""
     nonce = nonce or f"nonce_{uuid.uuid4().hex[:12]}"
-    resp = requests.post(f"{BACKEND}/pay", json={
+    resp = requests.post(f"{BACKEND}/pay", headers=HEADERS, json={
         "mandate_id": mandate_id,
         "amount":     amount,
         "category":   category,
@@ -92,7 +97,7 @@ def pay(mandate_id: str, amount: float, category: str, nonce: str = None) -> dic
 
 
 def revoke(mandate_id: str):
-    requests.delete(f"{BACKEND}/mandates/{mandate_id}")
+    requests.delete(f"{BACKEND}/mandates/{mandate_id}", headers=HEADERS)
 
 
 # ── Individual scenarios ──────────────────────────────────────────────────────
@@ -242,6 +247,7 @@ def run_all(scenario_filter: Optional[int] = None) -> list[ScenarioResult]:
     print(f"\n{'═' * 72}")
     print("  TrustRail — Adversarial Test Harness")
     print(f"  Backend: {BACKEND}")
+    print(f"  Merchant ID: {MERCHANT_ID}")
     print(f"{'═' * 72}\n")
 
     for fn in scenarios:
