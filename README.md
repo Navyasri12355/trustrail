@@ -235,6 +235,93 @@ Dashboard: http://localhost:5173
 | AP2 proof stand-in   | AP2 uses W3C Verifiable Credentials; TrustRail uses Ed25519 as a stand-in. Replacing `verify_signature()` in `ap2.py` with a VC verifier is the only production change needed. |
 | Single merchant demo | The demo uses one hardcoded merchant (`mrc_demo_001`). Multi-tenant is architecturally straightforward.                                                                        |
 | SQLite               | Default for local dev. Docker Compose uses Postgres 16 out of the box — see the Docker section above. |
+| No dashboard auth    | The reviewer dashboard (`frontend`) has no authentication. In production, this would require proper auth (e.g., OAuth, session management). |
+| No rate limiting     | API endpoints lack rate limiting. Production deployment should add rate limiting (e.g., nginx, API gateway) to prevent abuse. |
+| No backup/restore    | No automated backup procedures documented. Postgres volume in Docker persists but requires manual backup strategies. |
+| No CI/CD pipeline    | No automated testing, linting, or deployment pipeline. Unit tests exist but are not integrated into CI. |
+| No monitoring/alerting | No application monitoring (APM), error tracking (e.g., Sentry), or alerting configured. |
+| Single-region deployment | Architecture assumes single-region deployment. Multi-region deployment would require additional coordination for audit log consistency. |
+
+---
+
+## Security Considerations
+
+| Area | Current Implementation | Production Recommendation |
+| ---- | --------------------- | ------------------------- |
+| Key storage | Ed25519 keys in `.env` file | Use secrets manager (AWS Secrets Manager, HashiCorp Vault, or equivalent) |
+| API credentials | Razorpay keys in `.env` file | Same as above - secrets manager with rotation policy |
+| Transport security | HTTPS required for production | Enforce TLS 1.2+, use certificate pinning for agent-to-merchant communication |
+| Audit log integrity | SHA-256 hash chaining | Consider append-only log storage, periodic cryptographic attestation |
+| Dashboard access | No authentication | Implement OAuth 2.0 / SSO with role-based access control (RBAC) |
+| Input validation | Basic FastAPI validation | Add comprehensive schema validation, sanitization, and length limits |
+| Dependency security | No automated scanning | Integrate Snyk/Dependabot for dependency vulnerability scanning |
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+| ----- | -------- |
+| `ModuleNotFoundError: No module named 'backend'` | Ensure you're running commands from project root, or add `src` to PYTHONPATH |
+| Ed25519 key generation fails | Ensure `pynacl` is installed: `pip install pynacl` |
+| Docker compose fails with "port already in use" | Change ports in `docker-compose.yml` or stop conflicting services |
+| Frontend can't connect to backend | Check backend is running on `http://localhost:8000`, verify CORS settings |
+| Database connection errors | Verify Postgres is running, check `.env` database credentials |
+| Razorpay API errors | Ensure test-mode credentials are correct, check network connectivity |
+
+---
+
+## Environment Variables
+
+Required variables (see `.env.example`):
+
+```bash
+# Razorpay Test Mode
+RAZORPAY_KEY_ID=your_key_id
+RAZORPAY_KEY_SECRET=your_key_secret
+
+# Cryptographic Keys (Ed25519)
+ED25519_PRIVATE_KEY_HEX=your_private_key_hex
+ED25519_PUBLIC_KEY_HEX=your_public_key_hex
+
+# Database (local dev defaults shown)
+DATABASE_URL=sqlite:///./trustrail.db
+
+# Database (Docker/Postgres)
+# DATABASE_URL=postgresql://postgres:your_password@localhost:5432/trustrail
+POSTGRES_PASSWORD=your_secure_password
+```
+
+---
+
+## Testing
+
+```bash
+# Run adversarial test harness
+.venv\Scripts\python agent/harness.py
+
+# Run specific scenario
+.venv\Scripts\python agent/harness.py --scenario 7
+
+# Expected results: 7 scenarios, 1 ALLOW (scenario 1), 6 BLOCK (scenarios 2-7)
+```
+
+---
+
+## Contributing
+
+This is a buildathon project. Contributions welcome in the form of:
+- Protocol adapter implementations (new payment protocols)
+- Additional guardrail rules
+- Security hardening
+- Documentation improvements
+- Test coverage expansion
+
+---
+
+## License
+
+MIT License - See LICENSE file for details.
 
 ---
 
