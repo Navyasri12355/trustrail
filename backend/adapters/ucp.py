@@ -15,9 +15,10 @@ import json
 from datetime import datetime, timedelta
 
 from backend.db.database import get_db
-from backend.db.models import Mandate, AuditLog
+from backend.db.models import Mandate, AuditLog, Merchant
 from backend.guardrail.engine import MandateData, PaymentRequest, validate
 from backend.guardrail import audit as audit_writer
+from backend.dependencies.tenant import get_merchant_from_header
 from sqlalchemy import func
 
 router = APIRouter(prefix="/adapters/ucp", tags=["adapters"])
@@ -59,8 +60,11 @@ class UCPCheckoutResponse(BaseModel):
 
 # ── Helpers (shared with pay.py — avoid circular import by inlining) ──────────
 
-def _load_mandate(db: Session, mandate_id: str) -> Mandate:
-    m = db.query(Mandate).filter(Mandate.mandate_id == mandate_id).first()
+def _load_mandate(db: Session, mandate_id: str, merchant_id: str) -> Mandate:
+    m = db.query(Mandate).filter(
+        Mandate.mandate_id == mandate_id,
+        Mandate.merchant_id == merchant_id
+    ).first()
     if not m:
         raise HTTPException(status_code=404, detail=f"Mandate {mandate_id} not found")
     return m
@@ -110,14 +114,19 @@ def _get_seen_nonces(db: Session, mandate_id: str):
 # ── Route ─────────────────────────────────────────────────────────────────────
 
 @router.post("/checkout", response_model=UCPCheckoutResponse)
-def ucp_checkout(body: UCPCheckoutRequest, db: Session = Depends(get_db)):
+def ucp_checkout(
+    body: UCPCheckoutRequest,
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db)
+):
     """
     Story-10: UCP adapter.
     Translates UCP checkout payload → internal MandateRequest → guardrail → response.
     protocol_origin will be 'ucp' in audit log.
+    Enforces tenant isolation.
     """
     # ── Shape translation (UCP → internal) ───────────────────────────────────
-    mandate_row  = _load_mandate(db, body.mandate_id)
+    mandate_row  = _load_mandate(db, body.mandate_id, merchant.merchant_id)
     mandate_data = _to_mandate_data(mandate_row)
 
     payment_req = PaymentRequest(
@@ -142,6 +151,7 @@ def ucp_checkout(body: UCPCheckoutRequest, db: Session = Depends(get_db)):
     audit_writer.log_guardrail_decision(
         db=db,
         mandate_id=body.mandate_id,
+        merchant_id=merchant.merchant_id,
         decision=decision,
         amount=body.item.amount_inr,
         category=body.item.category,
@@ -163,14 +173,14 @@ def ucp_checkout(body: UCPCheckoutRequest, db: Session = Depends(get_db)):
         )
 
     # ── ALLOW → Razorpay ──────────────────────────────────────────────────────
-    import os, razorpay
+    import razorpay
     rz = razorpay.Client(auth=(
-        os.getenv("RAZORPAY_KEY_ID", ""),
-        os.getenv("RAZORPAY_KEY_SECRET", ""),
+        merchant.razorpay_key_id,
+        merchant.razorpay_key_secret,
     ))
     order = rz.order.create({
         "amount":   int(body.item.amount_inr * 100),
-        "currency": mandate_data.currency,
+        "currency": merchant.currency,
         "receipt":  f"ucp_{body.nonce[:16]}",
         "notes": {
             "mandate_id":      body.mandate_id,
@@ -178,6 +188,7 @@ def ucp_checkout(body: UCPCheckoutRequest, db: Session = Depends(get_db)):
             "category":        body.item.category,
             "protocol":        "ucp-1.0",
             "execution_token": decision.execution_token,
+            "merchant_id":     merchant.merchant_id,
         },
     })
 

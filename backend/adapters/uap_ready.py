@@ -31,9 +31,10 @@ from sqlalchemy.orm import Session
 
 from backend.crypto.keys import verify_signature
 from backend.db.database import get_db
-from backend.db.models import AuditLog, Mandate
+from backend.db.models import AuditLog, Mandate, Merchant
 from backend.guardrail import audit as audit_writer
 from backend.guardrail.engine import MandateData, PaymentRequest, validate
+from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter(prefix="/adapters/uap", tags=["adapters"])
 
@@ -120,10 +121,11 @@ def _verify_uap_token(token: UAPDelegationToken, mandate: Mandate) -> bool:
     return verify_signature(payload_bytes, token.uap_signature)
 
 
-def _uap_to_mandate_data(token: UAPDelegationToken, mandate: Mandate) -> MandateData:
+def _uap_to_mandate_data(token: UAPDelegationToken, mandate: Mandate, merchant_id: str) -> MandateData:
     """
     Map UAP delegation token fields → TrustRail MandateData.
     Full field mapping documented in docs/uap-mapping.md.
+    Enforces tenant isolation.
     """
     return MandateData(
         mandate_id=mandate.mandate_id,
@@ -183,7 +185,11 @@ def _build_field_mapping(token: UAPDelegationToken, mandate_id: str) -> dict:
 # ── Route ─────────────────────────────────────────────────────────────────────
 
 @router.post("/intent", response_model=UAPIntentResponse)
-def uap_intent(body: UAPPaymentIntent, db: Session = Depends(get_db)):
+def uap_intent(
+    body: UAPPaymentIntent,
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db)
+):
     """
     Story-12 (upgraded): Functional UAP adapter.
 
@@ -199,9 +205,13 @@ def uap_intent(body: UAPPaymentIntent, db: Session = Depends(get_db)):
       • Replace _verify_uap_token() with NPCI's actual token verification
       • Replace internal_mandate_id bridge field with NPCI delegation registry lookup
       • Add agent_registry_id validation against NPCI registry API
+    Enforces tenant isolation.
     """
-    # 1. Load stored mandate
-    mandate_row = db.query(Mandate).filter(Mandate.mandate_id == body.internal_mandate_id).first()
+    # 1. Load stored mandate with tenant isolation
+    mandate_row = db.query(Mandate).filter(
+        Mandate.mandate_id == body.internal_mandate_id,
+        Mandate.merchant_id == merchant.merchant_id
+    ).first()
     if not mandate_row:
         raise HTTPException(status_code=404, detail=f"Mandate {body.internal_mandate_id} not found")
 
@@ -209,7 +219,7 @@ def uap_intent(body: UAPPaymentIntent, db: Session = Depends(get_db)):
     token_verified = _verify_uap_token(body.delegation_token, mandate_row)
 
     # 3. Map UAP → internal MandateData
-    mandate_data = _uap_to_mandate_data(body.delegation_token, mandate_row)
+    mandate_data = _uap_to_mandate_data(body.delegation_token, mandate_row, merchant.merchant_id)
 
     payment_req = PaymentRequest(
         mandate_id=body.internal_mandate_id,
@@ -234,6 +244,7 @@ def uap_intent(body: UAPPaymentIntent, db: Session = Depends(get_db)):
     audit_writer.log_guardrail_decision(
         db=db,
         mandate_id=body.internal_mandate_id,
+        merchant_id=merchant.merchant_id,
         decision=decision,
         amount=body.amount_inr,
         category=body.category,
@@ -259,12 +270,12 @@ def uap_intent(body: UAPPaymentIntent, db: Session = Depends(get_db)):
 
     # 6b. ALLOW → Razorpay test-mode order
     rz = razorpay.Client(auth=(
-        os.getenv("RAZORPAY_KEY_ID", ""),
-        os.getenv("RAZORPAY_KEY_SECRET", ""),
+        merchant.razorpay_key_id,
+        merchant.razorpay_key_secret,
     ))
     order = rz.order.create({
         "amount":   int(body.amount_inr * 100),
-        "currency": mandate_data.currency,
+        "currency": merchant.currency,
         "receipt":  f"uap_{body.nonce[:16]}",
         "notes": {
             "mandate_id":       body.internal_mandate_id,
@@ -275,6 +286,7 @@ def uap_intent(body: UAPPaymentIntent, db: Session = Depends(get_db)):
             "category":         body.category,
             "protocol":         "uap-trustrail-v1",
             "execution_token":  decision.execution_token,
+            "merchant_id":      merchant.merchant_id,
         },
     })
 

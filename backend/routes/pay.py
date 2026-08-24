@@ -22,24 +22,26 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
-from backend.db.models import AuditLog, Mandate
+from backend.db.models import AuditLog, Mandate, Merchant
 from backend.guardrail import audit as audit_writer
 from backend.guardrail.engine import (
     MandateData, PaymentRequest, RuleResult, validate
 )
+from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter(tags=["payments"])
 
 
 # ── Razorpay client ───────────────────────────────────────────────────────────
 
-def _get_razorpay_client():
-    key_id     = os.getenv("RAZORPAY_KEY_ID", "")
-    key_secret = os.getenv("RAZORPAY_KEY_SECRET", "")
+def _get_razorpay_client(merchant: Merchant):
+    """Get Razorpay client with merchant-specific credentials."""
+    key_id     = merchant.razorpay_key_id
+    key_secret = merchant.razorpay_key_secret
     if not key_id or not key_secret:
         raise HTTPException(
             status_code=500,
-            detail="RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET not configured"
+            detail="Razorpay credentials not configured for merchant"
         )
     return razorpay.Client(auth=(key_id, key_secret))
 
@@ -115,13 +117,21 @@ def _get_seen_nonces(db: Session, mandate_id: str) -> List[str]:
 # ── Route ─────────────────────────────────────────────────────────────────────
 
 @router.post("/pay", response_model=PayResponse)
-def pay(body: PayRequest, db: Session = Depends(get_db)):
+def pay(
+    body: PayRequest,
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db)
+):
     """
     Story-09: Agent-initiated payment request.
     Always logs to audit trail — whether ALLOW or BLOCK.
+    Enforces tenant isolation.
     """
-    # 1. Load mandate
-    mandate_row = db.query(Mandate).filter(Mandate.mandate_id == body.mandate_id).first()
+    # 1. Load mandate with tenant isolation
+    mandate_row = db.query(Mandate).filter(
+        Mandate.mandate_id == body.mandate_id,
+        Mandate.merchant_id == merchant.merchant_id
+    ).first()
     if not mandate_row:
         raise HTTPException(status_code=404, detail="Mandate not found")
 
@@ -151,6 +161,7 @@ def pay(body: PayRequest, db: Session = Depends(get_db)):
     audit_writer.log_guardrail_decision(
         db=db,
         mandate_id=body.mandate_id,
+        merchant_id=merchant.merchant_id,
         decision=decision,
         amount=body.amount,
         category=body.category,
@@ -172,17 +183,18 @@ def pay(body: PayRequest, db: Session = Depends(get_db)):
 
     # 5b. ALLOW — call Razorpay test-mode Orders API
     try:
-        rz = _get_razorpay_client()
+        rz = _get_razorpay_client(merchant)
         # Razorpay amounts are in paise (INR × 100)
         order = rz.order.create({
             "amount":   int(body.amount * 100),
-            "currency": mandate_data.currency,
+            "currency": merchant.currency,
             "receipt":  f"tr_{body.nonce[:20]}",
             "notes": {
                 "mandate_id":       body.mandate_id,
                 "agent_id":         mandate_data.agent_id,
                 "category":         body.category,
                 "execution_token":  decision.execution_token,
+                "merchant_id":      merchant.merchant_id,
             },
         })
         razorpay_order_id = order["id"]

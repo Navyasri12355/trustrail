@@ -24,9 +24,10 @@ from sqlalchemy.orm import Session
 
 from backend.crypto.keys import verify_signature
 from backend.db.database import get_db
-from backend.db.models import AuditLog, Mandate
+from backend.db.models import AuditLog, Mandate, Merchant
 from backend.guardrail import audit as audit_writer
 from backend.guardrail.engine import MandateData, PaymentRequest, validate
+from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter(prefix="/adapters/ap2", tags=["adapters"])
 
@@ -108,13 +109,17 @@ def _verify_ap2_proof(cred: AP2MandateCredential) -> bool:
     return verify_signature(payload_bytes, cred.proof)
 
 
-def _ap2_to_mandate_data(cred: AP2MandateCredential, db: Session) -> MandateData:
+def _ap2_to_mandate_data(cred: AP2MandateCredential, db: Session, merchant_id: str) -> MandateData:
     """
     Map AP2 credential fields → TrustRail MandateData.
     Field mapping is documented in docs/uap-mapping.md.
+    Enforces tenant isolation.
     """
     # Look up the stored mandate to get the server-side signature
-    mandate_row = db.query(Mandate).filter(Mandate.mandate_id == cred.mandate_id).first()
+    mandate_row = db.query(Mandate).filter(
+        Mandate.mandate_id == cred.mandate_id,
+        Mandate.merchant_id == merchant_id
+    ).first()
     if not mandate_row:
         raise HTTPException(status_code=404, detail=f"Mandate {cred.mandate_id} not found")
 
@@ -158,7 +163,11 @@ def _get_seen_nonces(db: Session, mandate_id: str) -> List[str]:
 # ── Route ─────────────────────────────────────────────────────────────────────
 
 @router.post("/intent", response_model=AP2IntentResponse)
-def ap2_intent(body: AP2IntentRequest, db: Session = Depends(get_db)):
+def ap2_intent(
+    body: AP2IntentRequest,
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db)
+):
     """
     Story-11: AP2 adapter.
     1. Verify AP2 credential proof (Ed25519 stand-in for W3C VC)
@@ -166,6 +175,7 @@ def ap2_intent(body: AP2IntentRequest, db: Session = Depends(get_db)):
     3. Run guardrail engine (all 7 rules)
     4. Log to audit trail
     5. ALLOW → Razorpay order / BLOCK → structured refusal
+    Enforces tenant isolation.
     """
     # 1. Verify AP2 proof
     proof_verified = _verify_ap2_proof(body.credential)
@@ -173,7 +183,7 @@ def ap2_intent(body: AP2IntentRequest, db: Session = Depends(get_db)):
     # We still run all rules so the audit trail is complete.
 
     # 2. Map AP2 → internal
-    mandate_data = _ap2_to_mandate_data(body.credential, db)
+    mandate_data = _ap2_to_mandate_data(body.credential, db, merchant.merchant_id)
 
     payment_req = PaymentRequest(
         mandate_id=body.credential.mandate_id,
@@ -198,6 +208,7 @@ def ap2_intent(body: AP2IntentRequest, db: Session = Depends(get_db)):
     audit_writer.log_guardrail_decision(
         db=db,
         mandate_id=body.credential.mandate_id,
+        merchant_id=merchant.merchant_id,
         decision=decision,
         amount=body.amount_inr,
         category=body.category,
@@ -221,12 +232,12 @@ def ap2_intent(body: AP2IntentRequest, db: Session = Depends(get_db)):
 
     # 5b. ALLOW → Razorpay
     rz = razorpay.Client(auth=(
-        os.getenv("RAZORPAY_KEY_ID", ""),
-        os.getenv("RAZORPAY_KEY_SECRET", ""),
+        merchant.razorpay_key_id,
+        merchant.razorpay_key_secret,
     ))
     order = rz.order.create({
         "amount":   int(body.amount_inr * 100),
-        "currency": mandate_data.currency,
+        "currency": merchant.currency,
         "receipt":  f"ap2_{body.nonce[:16]}",
         "notes": {
             "mandate_id":      body.credential.mandate_id,
@@ -235,6 +246,7 @@ def ap2_intent(body: AP2IntentRequest, db: Session = Depends(get_db)):
             "category":        body.category,
             "protocol":        "ap2-draft-2025",
             "execution_token": decision.execution_token,
+            "merchant_id":     merchant.merchant_id,
         },
     })
 

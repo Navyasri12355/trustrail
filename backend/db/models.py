@@ -20,6 +20,22 @@ class Base(DeclarativeBase):
     pass
 
 
+class Merchant(Base):
+    """
+    Multi-tenant merchant configuration.
+    Each merchant has their own mandates, audit logs, and Razorpay credentials.
+    """
+    __tablename__ = "merchants"
+
+    merchant_id     = Column(String, primary_key=True, index=True)   # mrc_<uuid>
+    merchant_name   = Column(String, nullable=False)
+    razorpay_key_id = Column(String, nullable=False)
+    razorpay_key_secret = Column(String, nullable=False)
+    currency        = Column(String, default="INR")
+    active          = Column(Boolean, default=True, nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class Mandate(Base):
     """
     Signed, scoped, expiring permission object.
@@ -30,7 +46,7 @@ class Mandate(Base):
     mandate_id      = Column(String,  primary_key=True, index=True)   # mnd_<uuid>
     issuer_user_id  = Column(String,  nullable=False)
     agent_id        = Column(String,  nullable=False)
-    merchant_id     = Column(String,  nullable=False)
+    merchant_id     = Column(String,  ForeignKey("merchants.merchant_id"), nullable=False, index=True)
 
     # Scope stored as individual columns for easy querying
     allowed_categories    = Column(Text,  nullable=False)   # JSON array string, e.g. '["groceries","household"]'
@@ -55,6 +71,7 @@ class AuditLog(Base):
 
     id              = Column(String,  primary_key=True, default=lambda: str(uuid.uuid4()))
     mandate_id      = Column(String,  ForeignKey("mandates.mandate_id"), nullable=True)
+    merchant_id     = Column(String,  ForeignKey("merchants.merchant_id"), nullable=False, index=True)
     event_type      = Column(String,  nullable=False)   # "guardrail_decision" | "mandate_issued" | "mandate_revoked"
     decision        = Column(String,  nullable=True)    # "ALLOW" | "BLOCK"
     rules_checked   = Column(Text,    nullable=True)    # JSON list of RuleResult dicts

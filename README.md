@@ -31,23 +31,23 @@ AI buyer agent
       │
       ▼
 [1] GET /.well-known/ucp ──► Merchant manifest (categories, mandate_required: true)
-      │
+      │ (X-Merchant-ID header required for multi-tenant)
       ▼
 [2] POST /mandates ──────────► Issue signed mandate (Ed25519, scope-limited)
-      │
+      │ (scoped to merchant_id)
       ▼
 [3] POST /pay (or /adapters/ucp|ap2/...) ──► Protocol adapter normalises request
-      │
+      │ (tenant isolation enforced)
       ▼
 [4] Guardrail engine (7 rules, no short-circuit)
       ├─ BLOCK → log to audit trail, return structured refusal
       └─ ALLOW → sign execution token
       │
       ▼
-[5] Razorpay test-mode Orders API
+[5] Razorpay test-mode Orders API (merchant-specific credentials)
       │
       ▼
-[6] Hash-chained audit log (SHA-256 chained rows)
+[6] Hash-chained audit log (SHA-256 chained rows, merchant-scoped)
       │
       ▼
 [7] Reviewer dashboard — timeline · block rate · revoke button
@@ -58,7 +58,8 @@ AI buyer agent
 | Component                        | File                            | Story |
 | -------------------------------- | ------------------------------- | ----- |
 | UCP manifest                     | `backend/routes/manifest.py`    | 02    |
-| DB schema (mandates + audit_log) | `backend/db/models.py`          | 03    |
+| DB schema (merchants + mandates + audit_log) | `backend/db/models.py`          | 03    |
+| Merchant management API           | `backend/routes/merchants.py`   | Multi-tenant |
 | Mandate issuance + revocation    | `backend/routes/mandates.py`    | 04–05 |
 | Guardrail engine (7 rules)       | `backend/guardrail/engine.py`   | 06–07 |
 | Hash-chained audit log           | `backend/guardrail/audit.py`    | 08    |
@@ -136,6 +137,81 @@ docker compose up --build
 docker compose down          # stop, keep DB volume
 docker compose down -v       # stop AND wipe the Postgres volume
 ```
+
+---
+
+## Multi-Tenant Usage
+
+TrustRail now supports multi-tenant architecture where each merchant operates in complete isolation:
+
+### Key Concepts
+
+- **Merchant isolation**: Each merchant has their own mandates, audit logs, and Razorpay credentials
+- **X-Merchant-ID header**: All API endpoints require this header to identify the tenant
+- **Tenant-scoped data**: Database queries automatically filter by merchant_id for security
+
+### Setting Up Multi-Tenant
+
+1. **Create a merchant**:
+```bash
+curl -X POST http://localhost:8000/merchants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_name": "Acme Corp",
+    "razorpay_key_id": "rzp_test_XXXXXXXXXXXXXXXX",
+    "razorpay_key_secret": "XXXXXXXXXXXXXXXXXXXXXXXX",
+    "currency": "INR"
+  }'
+```
+
+Response:
+```json
+{
+  "merchant_id": "mrc_abc123...",
+  "merchant_name": "Acme Corp",
+  "razorpay_key_id": "rzp_test_XXXXXXXXXXXXXXXX",
+  "currency": "INR",
+  "active": true,
+  "created_at": "2026-08-24T10:00:00Z"
+}
+```
+
+2. **Use the merchant_id in all subsequent requests**:
+```bash
+# Get merchant-specific manifest
+curl http://localhost:8000/.well-known/ucp \
+  -H "X-Merchant-ID: mrc_abc123..."
+
+# Create a mandate for this merchant
+curl -X POST http://localhost:8000/mandates \
+  -H "Content-Type: application/json" \
+  -H "X-Merchant-ID: mrc_abc123..." \
+  -d '{
+    "issuer_user_id": "usr_123",
+    "agent_id": "agent_abc",
+    "scope": {
+      "allowed_categories": ["groceries"],
+      "max_per_transaction": 500.0,
+      "max_rolling_7d": 2000.0
+    }
+  }'
+```
+
+### Merchant Management API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/merchants` | Create new merchant |
+| GET | `/merchants` | List all merchants |
+| GET | `/merchants/{id}` | Get merchant details |
+| PUT | `/merchants/{id}` | Update merchant |
+| DELETE | `/merchants/{id}` | Deactivate merchant (soft delete) |
+
+### Backward Compatibility
+
+The single-tenant mode remains functional via environment variables:
+- `TRUSTRAIL_MERCHANT_ID` and `TRUSTRAIL_MERCHANT_NAME` in `.env`
+- Existing single-tenant installations continue to work without changes
 
 ---
 
@@ -233,7 +309,6 @@ Dashboard: http://localhost:5173
 | Test-mode only       | All Razorpay calls use test-mode APIs. No real money, no real users.                                                                                                           |
 | No UAP spec          | UAP token verification uses Ed25519 as a stand-in (same caveat as AP2). The adapter runs the full guardrail + Razorpay order on ALLOW. Replace `_verify_uap_token()` in `uap_ready.py` with NPCI's actual scheme when the spec ships. Every UAP field labeled CONFIRMED or ANTICIPATED in `docs/uap-mapping.md`. |
 | AP2 proof stand-in   | AP2 uses W3C Verifiable Credentials; TrustRail uses Ed25519 as a stand-in. Replacing `verify_signature()` in `ap2.py` with a VC verifier is the only production change needed. |
-| Single merchant demo | The demo uses one hardcoded merchant (`mrc_demo_001`). Multi-tenant is architecturally straightforward.                                                                        |
 | SQLite               | Default for local dev. Docker Compose uses Postgres 16 out of the box — see the Docker section above. |
 | No dashboard auth    | The reviewer dashboard (`frontend`) has no authentication. In production, this would require proper auth (e.g., OAuth, session management). |
 | No rate limiting     | API endpoints lack rate limiting. Production deployment should add rate limiting (e.g., nginx, API gateway) to prevent abuse. |

@@ -14,12 +14,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
-from backend.db.models import Mandate
+from backend.db.models import Mandate, Merchant
 from backend.crypto.keys import sign_payload
+from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter(prefix="/mandates", tags=["mandates"])
 
-MERCHANT_ID = os.getenv("TRUSTRAIL_MERCHANT_ID", "mrc_demo_001")
+# For backward compatibility with single-tenant mode
+DEFAULT_MERCHANT_ID = os.getenv("TRUSTRAIL_MERCHANT_ID", "mrc_demo_001")
 
 
 # ── Request / Response schemas ───────────────────────────────────────────────
@@ -102,7 +104,11 @@ def _build_signable_payload(
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201, response_model=MandateResponse)
-def create_mandate(body: CreateMandateRequest, db: Session = Depends(get_db)):
+def create_mandate(
+    body: CreateMandateRequest,
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db)
+):
     """
     Story-04: Issue a new signed mandate.
     Generates mandate_id, signs the payload with Ed25519, persists to DB.
@@ -122,7 +128,7 @@ def create_mandate(body: CreateMandateRequest, db: Session = Depends(get_db)):
         mandate_id=mandate_id,
         issuer_user_id=body.issuer_user_id,
         agent_id=body.agent_id,
-        merchant_id=MERCHANT_ID,
+        merchant_id=merchant.merchant_id,
         scope=scope_dict,
         issued_at=now,
         expires_at=expires_at,
@@ -138,11 +144,11 @@ def create_mandate(body: CreateMandateRequest, db: Session = Depends(get_db)):
         mandate_id=mandate_id,
         issuer_user_id=body.issuer_user_id,
         agent_id=body.agent_id,
-        merchant_id=MERCHANT_ID,
+        merchant_id=merchant.merchant_id,
         allowed_categories=json.dumps(body.scope.allowed_categories),
         max_per_transaction=body.scope.max_per_transaction,
         max_rolling_7d=body.scope.max_rolling_7d,
-        currency=body.scope.currency,
+        currency=merchant.currency,
         issued_at=now,
         expires_at=expires_at,
         revoked=False,
@@ -154,29 +160,62 @@ def create_mandate(body: CreateMandateRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(mandate)
 
+    # Log mandate issuance to audit trail
+    from backend.guardrail import audit as audit_writer
+    audit_writer.log_mandate_event(
+        db=db,
+        mandate_id=mandate_id,
+        merchant_id=merchant.merchant_id,
+        event_type="mandate_issued"
+    )
+
     return _mandate_to_response(mandate)
 
 
 @router.get("/{mandate_id}", response_model=MandateResponse)
-def get_mandate(mandate_id: str, db: Session = Depends(get_db)):
-    """Fetch a mandate by ID."""
-    mandate = db.query(Mandate).filter(Mandate.mandate_id == mandate_id).first()
+def get_mandate(
+    mandate_id: str,
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db)
+):
+    """Fetch a mandate by ID. Enforces tenant isolation."""
+    mandate = db.query(Mandate).filter(
+        Mandate.mandate_id == mandate_id,
+        Mandate.merchant_id == merchant.merchant_id
+    ).first()
     if not mandate:
         raise HTTPException(status_code=404, detail="Mandate not found")
     return _mandate_to_response(mandate)
 
 
 @router.delete("/{mandate_id}", status_code=200)
-def revoke_mandate(mandate_id: str, db: Session = Depends(get_db)):
+def revoke_mandate(
+    mandate_id: str,
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db)
+):
     """
     Story-05: Revoke a mandate — sets revoked=True.
     Subsequent guardrail checks on this mandate will BLOCK with reason 'revoked'.
+    Enforces tenant isolation.
     """
-    mandate = db.query(Mandate).filter(Mandate.mandate_id == mandate_id).first()
+    mandate = db.query(Mandate).filter(
+        Mandate.mandate_id == mandate_id,
+        Mandate.merchant_id == merchant.merchant_id
+    ).first()
     if not mandate:
         raise HTTPException(status_code=404, detail="Mandate not found")
 
     mandate.revoked = True
     db.commit()
+
+    # Log mandate revocation to audit trail
+    from backend.guardrail import audit as audit_writer
+    audit_writer.log_mandate_event(
+        db=db,
+        mandate_id=mandate_id,
+        merchant_id=merchant.merchant_id,
+        event_type="mandate_revoked"
+    )
 
     return {"mandate_id": mandate_id, "revoked": True, "message": "Mandate revoked successfully"}

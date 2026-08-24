@@ -1,29 +1,28 @@
 """
 Story-02: UCP-style merchant manifest endpoint
 GET /.well-known/ucp — agent-discoverable catalog
+Multi-tenant: requires X-Merchant-ID header to return merchant-specific manifest.
 """
 
-from fastapi import APIRouter
-import os
+from fastapi import APIRouter, Depends, HTTPException
+from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter()
 
-MERCHANT_ID   = os.getenv("TRUSTRAIL_MERCHANT_ID",   "mrc_demo_001")
-MERCHANT_NAME = os.getenv("TRUSTRAIL_MERCHANT_NAME", "Demo Merchant")
-
 
 @router.get("/.well-known/ucp")
-def ucp_manifest():
+def ucp_manifest(merchant = Depends(get_merchant_from_header)):
     """
     UCP-style manifest. Agents discover this endpoint to learn what the merchant
     sells, which categories are available, and that mandate-scoped payment is required.
+    Multi-tenant: Returns merchant-specific catalog based on X-Merchant-ID header.
     """
     return {
         "schema_version": "ucp-1.0",
         "merchant": {
-            "id":       MERCHANT_ID,
-            "name":     MERCHANT_NAME,
-            "currency": "INR",
+            "id":       merchant.merchant_id,
+            "name":     merchant.merchant_name,
+            "currency": merchant.currency,
         },
         "catalog": {
             "categories": [
