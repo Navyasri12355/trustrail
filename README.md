@@ -310,8 +310,7 @@ Dashboard: http://localhost:5173
 | No UAP spec          | UAP token verification uses Ed25519 as a stand-in (same caveat as AP2). The adapter runs the full guardrail + Razorpay order on ALLOW. Replace `_verify_uap_token()` in `uap_ready.py` with NPCI's actual scheme when the spec ships. Every UAP field labeled CONFIRMED or ANTICIPATED in `docs/uap-mapping.md`. |
 | AP2 proof stand-in   | AP2 uses W3C Verifiable Credentials; TrustRail uses Ed25519 as a stand-in. Replacing `verify_signature()` in `ap2.py` with a VC verifier is the only production change needed. |
 | SQLite               | Default for local dev. Docker Compose uses Postgres 16 out of the box — see the Docker section above. |
-| No dashboard auth    | The reviewer dashboard (`frontend`) has no authentication. In production, this would require proper auth (e.g., OAuth, session management). |
-| No rate limiting     | API endpoints lack rate limiting. Production deployment should add rate limiting (e.g., nginx, API gateway) to prevent abuse. |
+| Simple auth          | Dashboard uses JWT with default credentials (admin/admin123). Production should use OAuth 2.0 / SSO with proper user management. |
 | No backup/restore    | No automated backup procedures documented. Postgres volume in Docker persists but requires manual backup strategies. |
 | No CI/CD pipeline    | No automated testing, linting, or deployment pipeline. Unit tests exist but are not integrated into CI. |
 | No monitoring/alerting | No application monitoring (APM), error tracking (e.g., Sentry), or alerting configured. |
@@ -322,13 +321,15 @@ Dashboard: http://localhost:5173
 ## Security Considerations
 
 | Area | Current Implementation | Production Recommendation |
-| ---- | --------------------- | ------------------------- |
-| Key storage | Ed25519 keys in `.env` file | Use secrets manager (AWS Secrets Manager, HashiCorp Vault, or equivalent) |
-| API credentials | Razorpay keys in `.env` file | Same as above - secrets manager with rotation policy |
-| Transport security | HTTPS required for production | Enforce TLS 1.2+, use certificate pinning for agent-to-merchant communication |
-| Audit log integrity | SHA-256 hash chaining | Consider append-only log storage, periodic cryptographic attestation |
-| Dashboard access | No authentication | Implement OAuth 2.0 / SSO with role-based access control (RBAC) |
-| Input validation | Basic FastAPI validation | Add comprehensive schema validation, sanitization, and length limits |
+|------|------------------------|---------------------------|
+| Mandate signatures | Ed25519 (pynacl) | Keep Ed25519 or migrate to production key management service |
+| Audit log integrity | SHA-256 hash chain | Keep hash chain, add periodic hash verification |
+| Razorpay credentials | Database (per-merchant) | Use secret management (AWS Secrets Manager, Vault) |
+| API authentication | JWT for dashboard, open for payment endpoints | Add API keys or OAuth 2.0 for external integrations |
+| Dashboard authentication | JWT with default credentials | Use OAuth 2.0 / SSO with proper user management |
+| Rate limiting | slowapi (token bucket) per endpoint | Keep slowapi, add distributed rate limiting for multi-instance deployments |
+| Input validation | Pydantic models | Keep Pydantic, add additional sanitization for untrusted inputs |
+| SQL injection | SQLAlchemy ORM (parameterized) | Keep ORM, add query logging for monitoring |
 | Dependency security | No automated scanning | Integrate Snyk/Dependabot for dependency vulnerability scanning |
 
 ---

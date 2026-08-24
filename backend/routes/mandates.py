@@ -17,8 +17,11 @@ from backend.db.database import get_db
 from backend.db.models import Mandate, Merchant
 from backend.crypto.keys import sign_payload
 from backend.dependencies.tenant import get_merchant_from_header
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(prefix="/mandates", tags=["mandates"])
+limiter = Limiter(key_func=get_remote_address)
 
 # For backward compatibility with single-tenant mode
 DEFAULT_MERCHANT_ID = os.getenv("TRUSTRAIL_MERCHANT_ID", "mrc_demo_001")
@@ -104,6 +107,7 @@ def _build_signable_payload(
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201, response_model=MandateResponse)
+@limiter.limit("50/minute")  # Rate limit: 50 requests per minute per IP
 def create_mandate(
     body: CreateMandateRequest,
     merchant: Merchant = Depends(get_merchant_from_header),
@@ -112,6 +116,7 @@ def create_mandate(
     """
     Story-04: Issue a new signed mandate.
     Generates mandate_id, signs the payload with Ed25519, persists to DB.
+    Rate limited: 50 requests per minute per IP.
     """
     mandate_id = "mnd_" + str(uuid.uuid4()).replace("-", "")
     now        = datetime.utcnow()

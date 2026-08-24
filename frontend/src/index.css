@@ -58,6 +58,7 @@ body {
   border-radius: 20px; border: 1px solid var(--border2);
   color: var(--text-muted); letter-spacing: .04em;
 }
+.header-right { display: flex; align-items: center; gap: 12px; }
 
 .main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; width: 100%; }
 
@@ -111,6 +112,9 @@ body {
 .btn:active { transform: translateY(0); }
 .btn-danger   { background: var(--block); color: #fff; }
 .btn-refresh  { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border2); }
+.btn-primary  { background: var(--accent); color: #fff; }
+.btn-logout   { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border2); }
+.btn-full    { width: 100%; }
 .revoke-msg   { font-size: .8rem; padding: 6px 12px; border-radius: var(--radius-sm); }
 .revoke-msg.ok  { background: var(--allow-dim); color: var(--allow); }
 .revoke-msg.err { background: var(--block-dim); color: var(--block); }
@@ -197,3 +201,34 @@ body {
 ::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ── Login form ─────────────────────────────────────────────────────────────── */
+.login-container {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; background: var(--bg);
+}
+.login-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 32px; width: 100%; max-width: 400px;
+}
+.login-header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+}
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+.login-input {
+  background: var(--bg); border: 1px solid var(--border2);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 12px 16px; font-size: .9rem; outline: none;
+  transition: border-color .2s;
+}
+.login-input:focus { border-color: var(--accent); }
+.login-error {
+  background: var(--block-dim); color: var(--block);
+  padding: 8px 12px; border-radius: var(--radius-sm);
+  font-size: .85rem; text-align: center;
+}
+.login-footer {
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border2);
+  font-size: .75rem; color: var(--text-muted); text-align: center;
+}
+.login-footer p { margin: 4px 0; }

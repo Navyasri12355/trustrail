@@ -2,6 +2,20 @@ import { useState, useEffect, useCallback } from 'react'
 
 const API = 'http://localhost:8000'
 
+// ── Auth helpers ───────────────────────────────────────────────────────────────
+
+function getAuthToken() {
+  return localStorage.getItem('trustrail_token')
+}
+
+function setAuthToken(token) {
+  localStorage.setItem('trustrail_token', token)
+}
+
+function clearAuthToken() {
+  localStorage.removeItem('trustrail_token')
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(iso) {
@@ -104,11 +118,28 @@ export default function App() {
   const [loading,  setLoading]  = useState(true)
   const [revokeId, setRevokeId] = useState('')
   const [revokeMsg, setRevokeMsg] = useState(null)  // { text, ok }
+  const [authenticated, setAuthenticated] = useState(false)
+  const [authError, setAuthError] = useState(null)
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
 
   const fetchLog = useCallback(async () => {
+    const token = getAuthToken()
+    if (!token) {
+      setAuthenticated(false)
+      return
+    }
+
     setLoading(true)
     try {
-      const r = await fetch(`${API}/audit-log`)
+      const r = await fetch(`${API}/audit-log`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (r.status === 401) {
+        clearAuthToken()
+        setAuthenticated(false)
+        setLog([])
+        return
+      }
       const data = await r.json()
       setLog([...data].reverse())   // newest first
     } catch {
@@ -120,11 +151,52 @@ export default function App() {
 
   useEffect(() => { fetchLog() }, [fetchLog])
 
-  // Auto-refresh every 10s
+  // Check authentication on mount
   useEffect(() => {
+    const token = getAuthToken()
+    if (token) {
+      setAuthenticated(true)
+    }
+  }, [])
+
+  // Auto-refresh every 10s (only if authenticated)
+  useEffect(() => {
+    if (!authenticated) return
     const id = setInterval(fetchLog, 10_000)
     return () => clearInterval(id)
-  }, [fetchLog])
+  }, [fetchLog, authenticated])
+
+  // ── Auth handlers ─────────────────────────────────────────────────────────────
+  const handleLogin = async (e) => {
+    e.preventDefault()
+    setAuthError(null)
+    
+    try {
+      const r = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm)
+      })
+      const data = await r.json()
+      
+      if (r.ok) {
+        setAuthToken(data.access_token)
+        setAuthenticated(true)
+        setLoginForm({ username: '', password: '' })
+        fetchLog()
+      } else {
+        setAuthError(data.detail || 'Login failed')
+      }
+    } catch {
+      setAuthError('Network error')
+    }
+  }
+
+  const handleLogout = () => {
+    clearAuthToken()
+    setAuthenticated(false)
+    setLog([])
+  }
 
   // ── Metrics ─────────────────────────────────────────────────────────────────
   const decisions = log.filter(e => e.event_type === 'guardrail_decision')
@@ -136,8 +208,14 @@ export default function App() {
   // ── Revoke ──────────────────────────────────────────────────────────────────
   const handleRevoke = async () => {
     if (!revokeId.trim()) return
+    const token = getAuthToken()
+    if (!token) return
+
     try {
-      const r = await fetch(`${API}/mandates/${revokeId.trim()}`, { method: 'DELETE' })
+      const r = await fetch(`${API}/mandates/${revokeId.trim()}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
       if (r.ok) {
         setRevokeMsg({ text: `Mandate ${revokeId.trim()} revoked`, ok: true })
         setRevokeId('')
@@ -152,6 +230,50 @@ export default function App() {
     setTimeout(() => setRevokeMsg(null), 4000)
   }
 
+  // ── Login form ─────────────────────────────────────────────────────────────
+  if (!authenticated) {
+    return (
+      <div className="app">
+        <div className="login-container">
+          <div className="login-card">
+            <div className="login-header">
+              <div className="header-logo">T</div>
+              <div>
+                <div className="header-title">TrustRail</div>
+                <div className="header-sub">Dashboard Login</div>
+              </div>
+            </div>
+            <form onSubmit={handleLogin} className="login-form">
+              <input
+                type="text"
+                placeholder="Username"
+                value={loginForm.username}
+                onChange={e => setLoginForm({...loginForm, username: e.target.value})}
+                className="login-input"
+                autoFocus
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={loginForm.password}
+                onChange={e => setLoginForm({...loginForm, password: e.target.value})}
+                className="login-input"
+              />
+              {authError && <div className="login-error">{authError}</div>}
+              <button type="submit" className="btn btn-primary btn-full">
+                Login
+              </button>
+            </form>
+            <div className="login-footer">
+              <p>Default credentials: admin / admin123</p>
+              <p>Set via DASHBOARD_ADMIN_USERNAME and DASHBOARD_ADMIN_PASSWORD env vars</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -163,7 +285,12 @@ export default function App() {
             <div className="header-sub">Mandate & Guardrail Reviewer Dashboard</div>
           </div>
         </div>
-        <div className="header-badge">Razorpay AI Buildathon · Track 01</div>
+        <div className="header-right">
+          <div className="header-badge">Razorpay AI Buildathon · Track 01</div>
+          <button onClick={handleLogout} className="btn btn-logout">
+            Logout
+          </button>
+        </div>
       </header>
 
       <main className="main">

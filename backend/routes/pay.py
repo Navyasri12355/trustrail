@@ -28,8 +28,11 @@ from backend.guardrail.engine import (
     MandateData, PaymentRequest, RuleResult, validate
 )
 from backend.dependencies.tenant import get_merchant_from_header
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(tags=["payments"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Razorpay client ───────────────────────────────────────────────────────────
@@ -117,6 +120,7 @@ def _get_seen_nonces(db: Session, mandate_id: str) -> List[str]:
 # ── Route ─────────────────────────────────────────────────────────────────────
 
 @router.post("/pay", response_model=PayResponse)
+@limiter.limit("100/minute")  # Rate limit: 100 requests per minute per IP
 def pay(
     body: PayRequest,
     merchant: Merchant = Depends(get_merchant_from_header),
@@ -126,6 +130,7 @@ def pay(
     Story-09: Agent-initiated payment request.
     Always logs to audit trail — whether ALLOW or BLOCK.
     Enforces tenant isolation.
+    Rate limited: 100 requests per minute per IP.
     """
     # 1. Load mandate with tenant isolation
     mandate_row = db.query(Mandate).filter(
