@@ -67,22 +67,3 @@ def get_merchant_from_path(
         )
     
     return merchant
-
-
-def get_optional_merchant_from_header(
-    x_merchant_id: Optional[str] = Header(None, alias="X-Merchant-ID"),
-    db: Session = Depends(get_db)
-) -> Optional[Merchant]:
-    """
-    Optional merchant extraction from header. Returns None if header not provided.
-    Useful for backward compatibility with single-tenant mode.
-    """
-    if not x_merchant_id:
-        return None
-    
-    merchant = db.query(Merchant).filter(
-        Merchant.merchant_id == x_merchant_id,
-        Merchant.active == True
-    ).first()
-    
-    return merchant
