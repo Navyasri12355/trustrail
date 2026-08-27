@@ -375,7 +375,7 @@ Dashboard: http://localhost:5173
 | AP2 proof stand-in   | AP2 uses W3C Verifiable Credentials; TrustRail uses Ed25519 as a stand-in. Replacing `verify_signature()` in `ap2.py` with a VC verifier is the only production change needed. |
 | SQLite               | Default for local dev. Docker Compose uses Postgres 16 out of the box — see the Docker section above. |
 | Simple auth          | Dashboard uses JWT with default credentials (admin/admin123). Production should use OAuth 2.0 / SSO with proper user management. |
-| No backup/restore    | No automated backup procedures documented. Postgres volume in Docker persists but requires manual backup strategies. |
+| Manual backup only   | Backup scripts exist (backup_db.ps1/backup_db.sh) but require manual execution. No automated scheduled backups. |
 | Basic CI only        | GitHub Actions runs linting and unit tests. No staging environment or automated deployment. |
 | No monitoring/alerting | No application monitoring (APM), error tracking (e.g., Sentry), or alerting configured. |
 | Single-region deployment | Architecture assumes single-region deployment. Multi-region deployment would require additional coordination for audit log consistency. |
