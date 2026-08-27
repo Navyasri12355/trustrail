@@ -23,9 +23,6 @@ from slowapi.util import get_remote_address
 router = APIRouter(prefix="/mandates", tags=["mandates"])
 limiter = Limiter(key_func=get_remote_address)
 
-# For backward compatibility with single-tenant mode
-DEFAULT_MERCHANT_ID = os.getenv("TRUSTRAIL_MERCHANT_ID", "mrc_demo_001")
-
 
 # ── Request / Response schemas ───────────────────────────────────────────────
 

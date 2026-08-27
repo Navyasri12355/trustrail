@@ -92,13 +92,14 @@ def _load_mandate_data(mandate: Mandate) -> MandateData:
     )
 
 
-def _get_spent_7d(db: Session, mandate_id: str) -> float:
+def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
     """Sum of approved payments for this mandate in the trailing 7 days."""
     cutoff = datetime.utcnow() - timedelta(days=7)
     result = (
         db.query(func.sum(AuditLog.amount))
         .filter(
             AuditLog.mandate_id == mandate_id,
+            AuditLog.merchant_id == merchant_id,
             AuditLog.decision   == "ALLOW",
             AuditLog.created_at >= cutoff,
         )
@@ -107,11 +108,15 @@ def _get_spent_7d(db: Session, mandate_id: str) -> float:
     return float(result or 0.0)
 
 
-def _get_seen_nonces(db: Session, mandate_id: str) -> List[str]:
+def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str]:
     """All nonces ever used under this mandate."""
     rows = (
         db.query(AuditLog.nonce)
-        .filter(AuditLog.mandate_id == mandate_id, AuditLog.nonce.isnot(None))
+        .filter(
+            AuditLog.mandate_id == mandate_id,
+            AuditLog.merchant_id == merchant_id,
+            AuditLog.nonce.isnot(None)
+        )
         .all()
     )
     return [r.nonce for r in rows]
@@ -143,8 +148,8 @@ def pay(
     mandate_data = _load_mandate_data(mandate_row)
 
     # 2. Query history for rolling cap + replay detection
-    spent_7d    = _get_spent_7d(db, body.mandate_id)
-    seen_nonces = _get_seen_nonces(db, body.mandate_id)
+    spent_7d    = _get_spent_7d(db, body.mandate_id, merchant.merchant_id)
+    seen_nonces = _get_seen_nonces(db, body.mandate_id, merchant.merchant_id)
 
     payment_req = PaymentRequest(
         mandate_id=body.mandate_id,
