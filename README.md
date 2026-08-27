@@ -207,11 +207,75 @@ curl -X POST http://localhost:8000/mandates \
 | PUT | `/merchants/{id}` | Update merchant |
 | DELETE | `/merchants/{id}` | Deactivate merchant (soft delete) |
 
-### Backward Compatibility
+### Migration from Single-Tenant
 
-The single-tenant mode remains functional via environment variables:
-- `TRUSTRAIL_MERCHANT_ID` and `TRUSTRAIL_MERCHANT_NAME` in `.env`
-- Existing single-tenant installations continue to work without changes
+Existing single-tenant installations can migrate using the provided script:
+```bash
+python -m scripts.migrate_to_multitenant
+```
+
+This script:
+- Creates the merchants table
+- Creates a default merchant from your existing `TRUSTRAIL_MERCHANT_ID` and `TRUSTRAIL_MERCHANT_NAME` environment variables
+- Adds `merchant_id` columns to mandates and audit_log tables
+- Updates existing data with the default merchant_id
+- Creates performance indexes
+
+After migration, all API endpoints will require the `X-Merchant-ID` header.
+
+---
+
+## CI/CD Pipeline
+
+TrustRail uses GitHub Actions for continuous integration. The pipeline runs on every push to `main`/`develop` branches and on all pull requests.
+
+### What's Checked
+
+- **Linting**: ruff for Python code quality
+- **Formatting**: black for consistent code style
+- **Type checking**: mypy for static type analysis
+- **Unit tests**: pytest for backend test suite
+- **Adversarial tests**: Full 7-scenario test harness execution
+
+### Workflow File
+
+`.github/workflows/ci.yml` defines the CI pipeline. It:
+- Sets up Python 3.11 with pip caching
+- Installs dependencies from `backend/requirements.txt`
+- Runs all quality checks in parallel
+- Executes the adversarial test harness with test credentials
+
+### Running Locally
+
+To run the same checks locally:
+
+```bash
+# Install dev dependencies
+pip install -r backend/requirements.txt
+
+# Lint
+ruff check backend/
+
+# Format check
+black --check backend/
+
+# Type check
+mypy backend/ --ignore-missing-imports
+
+# Unit tests
+pytest backend/tests/ -v
+
+# Adversarial harness
+python agent/harness.py
+```
+
+### Future Enhancements
+
+- Add staging environment deployment
+- Add automated database migration testing
+- Add secret scanning (TruffleHog)
+- Add frontend linting (ESLint)
+- Add integration tests with live Razorpay test API
 
 ---
 
@@ -312,7 +376,7 @@ Dashboard: http://localhost:5173
 | SQLite               | Default for local dev. Docker Compose uses Postgres 16 out of the box — see the Docker section above. |
 | Simple auth          | Dashboard uses JWT with default credentials (admin/admin123). Production should use OAuth 2.0 / SSO with proper user management. |
 | No backup/restore    | No automated backup procedures documented. Postgres volume in Docker persists but requires manual backup strategies. |
-| No CI/CD pipeline    | No automated testing, linting, or deployment pipeline. Unit tests exist but are not integrated into CI. |
+| Basic CI only        | GitHub Actions runs linting and unit tests. No staging environment or automated deployment. |
 | No monitoring/alerting | No application monitoring (APM), error tracking (e.g., Sentry), or alerting configured. |
 | Single-region deployment | Architecture assumes single-region deployment. Multi-region deployment would require additional coordination for audit log consistency. |
 

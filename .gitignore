@@ -42,3 +42,7 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 .coverage
+trustrail_pytest.db
+
+# DB backups (scripts/backup_db.*)
+backups/
