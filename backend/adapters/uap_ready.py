@@ -144,12 +144,13 @@ def _uap_to_mandate_data(token: UAPDelegationToken, mandate: Mandate, merchant_i
     )
 
 
-def _get_spent_7d(db: Session, mandate_id: str) -> float:
+def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
     cutoff = datetime.utcnow() - timedelta(days=7)
     result = (
         db.query(func.sum(AuditLog.amount))
         .filter(
             AuditLog.mandate_id == mandate_id,
+            AuditLog.merchant_id == merchant_id,
             AuditLog.decision   == "ALLOW",
             AuditLog.created_at >= cutoff,
         )
@@ -158,10 +159,14 @@ def _get_spent_7d(db: Session, mandate_id: str) -> float:
     return float(result or 0.0)
 
 
-def _get_seen_nonces(db: Session, mandate_id: str) -> List[str]:
+def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str]:
     rows = (
         db.query(AuditLog.nonce)
-        .filter(AuditLog.mandate_id == mandate_id, AuditLog.nonce.isnot(None))
+        .filter(
+            AuditLog.mandate_id == mandate_id,
+            AuditLog.merchant_id == merchant_id,
+            AuditLog.nonce.isnot(None)
+        )
         .all()
     )
     return [r.nonce for r in rows]
@@ -230,8 +235,8 @@ def uap_intent(
     )
 
     # 4. Run full guardrail (all 7 rules, no short-circuit)
-    spent_7d    = _get_spent_7d(db, body.internal_mandate_id)
-    seen_nonces = _get_seen_nonces(db, body.internal_mandate_id)
+    spent_7d    = _get_spent_7d(db, body.internal_mandate_id, merchant.merchant_id)
+    seen_nonces = _get_seen_nonces(db, body.internal_mandate_id, merchant.merchant_id)
 
     decision = validate(
         mandate=mandate_data,
