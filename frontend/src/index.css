@@ -60,6 +60,18 @@ body {
 }
 .header-right { display: flex; align-items: center; gap: 12px; }
 
+.chain-pill {
+  font-size: 0.7rem; font-weight: 600; padding: 4px 10px;
+  border-radius: 20px; letter-spacing: .04em; font-family: 'JetBrains Mono', monospace;
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chain-pill.intact {
+  border: 1px solid var(--allow); color: var(--allow); background: var(--allow-dim);
+}
+.chain-pill.broken {
+  border: 1px solid var(--block); color: var(--block); background: var(--block-dim);
+}
+
 .main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; width: 100%; }
 
 /* ── Metric cards ──────────────────────────────────────────────────────────── */

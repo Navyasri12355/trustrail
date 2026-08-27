@@ -121,9 +121,12 @@ export default function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [authError, setAuthError] = useState(null)
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  const [merchantId, setMerchantId] = useState('mrc_demo_001')
+  const [chainStatus, setChainStatus] = useState(null)  // { intact, rows_checked, detail }
 
   const fetchLog = useCallback(async () => {
     const token = getAuthToken()
+    
     if (!token) {
       setAuthenticated(false)
       return
@@ -132,22 +135,43 @@ export default function App() {
     setLoading(true)
     try {
       const r = await fetch(`${API}/audit-log`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'X-Merchant-ID': merchantId
+        }
       })
       if (r.status === 401) {
         clearAuthToken()
         setAuthenticated(false)
         setLog([])
+        setChainStatus(null)
+        return
+      }
+      if (!r.ok) {
+        setLog([])
+        setChainStatus(null)
         return
       }
       const data = await r.json()
-      setLog([...data].reverse())   // newest first
+      setLog(Array.isArray(data) ? [...data].reverse() : [])
+
+      const vr = await fetch(`${API}/audit-log/verify`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Merchant-ID': merchantId
+        }
+      })
+      if (vr.ok) {
+        setChainStatus(await vr.json())
+      } else {
+        setChainStatus(null)
+      }
     } catch {
       setLog([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [merchantId])
 
   useEffect(() => { fetchLog() }, [fetchLog])
 
@@ -214,7 +238,10 @@ export default function App() {
     try {
       const r = await fetch(`${API}/mandates/${revokeId.trim()}`, { 
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'X-Merchant-ID': merchantId
+        }
       })
       if (r.ok) {
         setRevokeMsg({ text: `Mandate ${revokeId.trim()} revoked`, ok: true })
@@ -259,14 +286,21 @@ export default function App() {
                 onChange={e => setLoginForm({...loginForm, password: e.target.value})}
                 className="login-input"
               />
+              <input
+                type="text"
+                placeholder="Merchant ID (optional)"
+                value={merchantId}
+                onChange={e => setMerchantId(e.target.value)}
+                className="login-input"
+              />
               {authError && <div className="login-error">{authError}</div>}
               <button type="submit" className="btn btn-primary btn-full">
                 Login
               </button>
             </form>
             <div className="login-footer">
-              <p>Default credentials: admin / admin123</p>
-              <p>Set via DASHBOARD_ADMIN_USERNAME and DASHBOARD_ADMIN_PASSWORD env vars</p>
+              <p>Use DASHBOARD_ADMIN_USERNAME and DASHBOARD_ADMIN_PASSWORD from your .env</p>
+              <p>Default merchant header: mrc_demo_001</p>
             </div>
           </div>
         </div>
@@ -286,6 +320,16 @@ export default function App() {
           </div>
         </div>
         <div className="header-right">
+          {chainStatus && (
+            <div
+              className={`chain-pill ${chainStatus.intact ? 'intact' : 'broken'}`}
+              title={chainStatus.detail}
+            >
+              {chainStatus.intact
+                ? `chain intact · ${chainStatus.rows_checked}`
+                : `chain broken · ${chainStatus.detail}`}
+            </div>
+          )}
           <div className="header-badge">Razorpay AI Buildathon · Track 01</div>
           <button onClick={handleLogout} className="btn btn-logout">
             Logout

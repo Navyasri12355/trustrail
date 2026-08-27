@@ -2,15 +2,19 @@
 Story-08 (continued): GET /audit-log endpoint.
 Returns the full hash-chained audit trail in chronological order.
 Requires authentication for dashboard access.
+Enforces tenant isolation - returns only audit logs for the specified merchant.
 """
 
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
-from backend.db.models import AuditLog
+from backend.db.models import AuditLog, Merchant
+from backend.dependencies.tenant import get_merchant_from_header
+from backend.guardrail import audit as audit_writer
 from backend.routes.auth import get_current_user
 
 router = APIRouter(tags=["audit"])
@@ -32,16 +36,26 @@ class AuditEntryOut(BaseModel):
     row_hash:     str
 
 
+class ChainVerifyOut(BaseModel):
+    intact:        bool
+    rows_checked:  int
+    break_at:      Optional[str]
+    detail:        str
+
+
 @router.get("/audit-log", response_model=List[AuditEntryOut])
 def get_audit_log(
+    merchant: Merchant = Depends(get_merchant_from_header),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    _user: dict = Depends(get_current_user),
 ):
     """
-    Return the full audit trail in chronological order.
-    Requires authentication (admin access only).
+    Return the audit trail for the specified merchant in chronological order.
+    Requires X-Merchant-ID header and a dashboard JWT.
     """
-    rows = db.query(AuditLog).order_by(AuditLog.created_at.asc()).all()
+    rows = db.query(AuditLog).filter(
+        AuditLog.merchant_id == merchant.merchant_id
+    ).order_by(AuditLog.created_at.asc()).all()
     return [
         AuditEntryOut(
             id=r.id,
@@ -60,3 +74,20 @@ def get_audit_log(
         )
         for r in rows
     ]
+
+
+@router.get("/audit-log/verify", response_model=ChainVerifyOut)
+def verify_audit_chain(
+    merchant: Merchant = Depends(get_merchant_from_header),
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Recompute the global SHA-256 audit chain.
+    Tenant header is required so only a logged-in reviewer can run this;
+    verification itself walks every row (chain is process-global).
+    """
+    # merchant is authenticated/isolated even though the chain is global
+    _ = merchant
+    result = audit_writer.verify_chain(db)
+    return ChainVerifyOut(**result)
