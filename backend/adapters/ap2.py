@@ -36,9 +36,9 @@ router = APIRouter(prefix="/adapters/ap2", tags=["adapters"])
 class AP2Scope(BaseModel):
     """AP2 mandate scope — mirrors our internal scope but uses AP2 field names."""
 
-    permitted_categories: list[str] = Field(..., example=["groceries"])
-    max_single_txn_inr: float = Field(..., gt=0, example=500.0)
-    max_7d_window_inr: float = Field(..., gt=0, example=2000.0)
+    permitted_categories: list[str] = Field(..., examples=[["groceries"]])
+    max_single_txn_inr: float = Field(..., gt=0, examples=[500.0])
+    max_7d_window_inr: float = Field(..., gt=0, examples=[2000.0])
     currency: str = Field(default="INR")
 
 
@@ -50,25 +50,25 @@ class AP2MandateCredential(BaseModel):
     See docs/uap-mapping.md for the AP2 → TrustRail field mapping.
     """
 
-    mandate_id: str = Field(..., example="mnd_abc123")
+    mandate_id: str = Field(..., examples=["mnd_abc123"])
     issuer_did: str = Field(
-        ..., example="did:example:usr_123"
+        ..., examples=["did:example:usr_123"]
     )  # maps to issuer_user_id
-    agent_did: str = Field(..., example="did:example:agent_abc")
-    merchant_id: str = Field(..., example="mrc_demo_001")
+    agent_did: str = Field(..., examples=["did:example:agent_abc"])
+    merchant_id: str = Field(..., examples=["mrc_demo_001"])
     scope: AP2Scope
-    issued_at: str = Field(..., example="2026-08-22T10:00:00Z")
-    expires_at: str = Field(..., example="2026-09-22T10:00:00Z")
-    proof: str = Field(..., example="ed25519:<hex>")  # AP2 VC proof field
+    issued_at: str = Field(..., examples=["2026-08-22T10:00:00Z"])
+    expires_at: str = Field(..., examples=["2026-09-22T10:00:00Z"])
+    proof: str = Field(..., examples=["ed25519:<hex>"])  # AP2 VC proof field
 
 
 class AP2IntentRequest(BaseModel):
     """Full AP2 payment intent — the mandate credential + the specific payment request."""
 
     credential: AP2MandateCredential
-    amount_inr: float = Field(..., gt=0, example=299.0)
-    category: str = Field(..., example="groceries")
-    nonce: str = Field(..., example="ap2_nonce_001")
+    amount_inr: float = Field(..., gt=0, examples=[299.0])
+    category: str = Field(..., examples=["groceries"])
+    nonce: str = Field(..., examples=["ap2_nonce_001"])
 
 
 # ── AP2-shaped response ───────────────────────────────────────────────────────

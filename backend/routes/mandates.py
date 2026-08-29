@@ -26,19 +26,19 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 class MandateScope(BaseModel):
-    allowed_categories: list[str] = Field(..., example=["groceries", "household"])
-    max_per_transaction: float = Field(..., gt=0, example=500.0)
-    max_rolling_7d: float = Field(..., gt=0, example=2000.0)
+    allowed_categories: list[str] = Field(..., examples=[["groceries", "household"]])
+    max_per_transaction: float = Field(..., gt=0, examples=[500.0])
+    max_rolling_7d: float = Field(..., gt=0, examples=[2000.0])
     currency: str = Field(default="INR")
 
 
 class CreateMandateRequest(BaseModel):
-    issuer_user_id: str = Field(..., example="usr_123")
-    agent_id: str = Field(..., example="agent_abc")
+    issuer_user_id: str = Field(..., examples=["usr_123"])
+    agent_id: str = Field(..., examples=["agent_abc"])
     scope: MandateScope
     expires_in_days: int = Field(default=30, ge=1, le=365)
     protocol_origin: str = Field(
-        default="internal", example="ap2 | ucp | uap_ready | internal"
+        default="internal", examples=["ap2 | ucp | uap_ready | internal"]
     )
 
 

@@ -29,23 +29,23 @@ router = APIRouter(prefix="/adapters/ucp", tags=["adapters"])
 
 
 class UCPBuyerAgent(BaseModel):
-    agent_id: str = Field(..., example="agent_shopping_bot_v1")
-    user_id: str = Field(..., example="usr_123")
+    agent_id: str = Field(..., examples=["agent_shopping_bot_v1"])
+    user_id: str = Field(..., examples=["usr_123"])
 
 
 class UCPCatalogItem(BaseModel):
-    category: str = Field(..., example="groceries")
-    item_name: str = Field(..., example="Organic Oats 1kg")
-    amount_inr: float = Field(..., gt=0, example=299.0)
+    category: str = Field(..., examples=["groceries"])
+    item_name: str = Field(..., examples=["Organic Oats 1kg"])
+    amount_inr: float = Field(..., gt=0, examples=[299.0])
 
 
 class UCPCheckoutRequest(BaseModel):
     """UCP-style checkout call shape."""
 
-    mandate_id: str = Field(..., example="mnd_abc123")
+    mandate_id: str = Field(..., examples=["mnd_abc123"])
     buyer_agent: UCPBuyerAgent
     item: UCPCatalogItem
-    nonce: str = Field(..., example="ucp_nonce_001")
+    nonce: str = Field(..., examples=["ucp_nonce_001"])
     merchant_id: str | None = None
 
 

@@ -26,8 +26,8 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(..., example="admin")
-    password: str = Field(..., example="your-dashboard-password")
+    username: str = Field(..., examples=["admin"])
+    password: str = Field(..., examples=["your-dashboard-password"])
 
 
 class TokenResponse(BaseModel):

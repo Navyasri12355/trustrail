@@ -24,10 +24,10 @@ router = APIRouter(prefix="/merchants", tags=["merchants"])
 
 
 class CreateMerchantRequest(BaseModel):
-    merchant_name: str = Field(..., example="Acme Corp")
-    razorpay_key_id: str = Field(..., example="rzp_test_XXXXXXXXXXXXXXXX")
-    razorpay_key_secret: str = Field(..., example="XXXXXXXXXXXXXXXXXXXXXXXX")
-    currency: str = Field(default="INR", example="INR")
+    merchant_name: str = Field(..., examples=["Acme Corp"])
+    razorpay_key_id: str = Field(..., examples=["rzp_test_XXXXXXXXXXXXXXXX"])
+    razorpay_key_secret: str = Field(..., examples=["XXXXXXXXXXXXXXXXXXXXXXXX"])
+    currency: str = Field(default="INR", examples=["INR"])
 
 
 class UpdateMerchantRequest(BaseModel):
