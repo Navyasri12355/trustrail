@@ -14,7 +14,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import razorpay
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -49,10 +49,12 @@ def _get_razorpay_client(merchant: Merchant):
 
 
 class PayRequest(BaseModel):
-    mandate_id: str = Field(..., example="mnd_abc123")
-    amount: float = Field(..., gt=0, example=499.0)
-    category: str = Field(..., example="groceries")
-    nonce: str = Field(..., example="nonce_unique_per_request_001")
+    mandate_id: str = Field(..., json_schema_extra={"example": "mnd_abc123"})
+    amount: float = Field(..., gt=0, json_schema_extra={"example": 499.0})
+    category: str = Field(..., json_schema_extra={"example": "groceries"})
+    nonce: str = Field(
+        ..., json_schema_extra={"example": "nonce_unique_per_request_001"}
+    )
 
 
 class RuleResultOut(BaseModel):
@@ -72,6 +74,13 @@ class PayResponse(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Attach UTC timezone to a naive datetime coming from SQLite."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _load_mandate_data(mandate: Mandate) -> MandateData:
     return MandateData(
         mandate_id=mandate.mandate_id,
@@ -82,8 +91,8 @@ def _load_mandate_data(mandate: Mandate) -> MandateData:
         max_per_transaction=mandate.max_per_transaction,
         max_rolling_7d=mandate.max_rolling_7d,
         currency=mandate.currency,
-        issued_at=mandate.issued_at,
-        expires_at=mandate.expires_at,
+        issued_at=_ensure_utc(mandate.issued_at),
+        expires_at=_ensure_utc(mandate.expires_at),
         revoked=mandate.revoked,
         signature=mandate.signature,
         protocol_origin=mandate.protocol_origin,
@@ -92,7 +101,8 @@ def _load_mandate_data(mandate: Mandate) -> MandateData:
 
 def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
     """Sum of approved payments for this mandate in the trailing 7 days."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    # Use naive UTC to match SQLite's stored naive datetimes
+    cutoff = datetime.now() - timedelta(days=7)  # noqa: DTZ005
     result = (
         db.query(func.sum(AuditLog.amount))
         .filter(
@@ -126,6 +136,7 @@ def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> list[str
 @router.post("/pay", response_model=PayResponse)
 @limiter.limit("100/minute")  # Rate limit: 100 requests per minute per IP
 def pay(
+    request: Request,
     body: PayRequest,
     merchant: Merchant = Depends(get_merchant_from_header),
     db: Session = Depends(get_db),

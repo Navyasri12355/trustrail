@@ -7,7 +7,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -108,6 +108,7 @@ def _build_signable_payload(
 @router.post("", status_code=201, response_model=MandateResponse)
 @limiter.limit("50/minute")  # Rate limit: 50 requests per minute per IP
 def create_mandate(
+    request: Request,
     body: CreateMandateRequest,
     merchant: Merchant = Depends(get_merchant_from_header),
     db: Session = Depends(get_db),

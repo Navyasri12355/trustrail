@@ -41,34 +41,12 @@ jobs:
       # --no-error-summary keeps output readable; errors are still surfaced
       run: mypy . --ignore-missing-imports --no-error-summary
 
-    - name: Run unit tests
-      # Fail the job if any test fails (no || true)
+    - name: Run unit + adversarial tests
+      # Includes test_adversarial_scenarios.py (7 PRD scenarios) via TestClient.
+      # No live server required — the ASGI app runs fully in-process.
       run: pytest tests/ -v --tb=short
       env:
-        DATABASE_URL: sqlite:///./test.db
-        ED25519_PRIVATE_KEY_HEX: "0000000000000000000000000000000000000000000000000000000000000001"
-        ED25519_PUBLIC_KEY_HEX: "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29"
-        JWT_SECRET_KEY: test_secret_key_for_ci_min_32_chars_long
-        DASHBOARD_ADMIN_USERNAME: admin
-        DASHBOARD_ADMIN_PASSWORD: admin123
-
-    - name: Run adversarial test harness
-      # Must run from the repo root so 'from agent.harness import …' resolves
-      working-directory: .
-      run: |
-        python -c "
-        import sys
-        from agent.harness import run_all
-        results = run_all()
-        failed = [r for r in results if not r.passed]
-        if failed:
-            for r in failed:
-                print(f'FAIL: {r}', file=sys.stderr)
-            sys.exit(1)
-        print(f'All {len(results)} harness scenarios passed.')
-        "
-      env:
-        DATABASE_URL: sqlite:///./test.db
+        DATABASE_URL: sqlite:///:memory:
         RAZORPAY_KEY_ID: rzp_test_ci_key
         RAZORPAY_KEY_SECRET: rzp_test_ci_secret
         ED25519_PRIVATE_KEY_HEX: "0000000000000000000000000000000000000000000000000000000000000001"
@@ -76,7 +54,8 @@ jobs:
         JWT_SECRET_KEY: test_secret_key_for_ci_min_32_chars_long
         DASHBOARD_ADMIN_USERNAME: admin
         DASHBOARD_ADMIN_PASSWORD: admin123
-        HARNESS_MERCHANT_ID: mrc_demo_001
+        TRUSTRAIL_MERCHANT_ID: mrc_demo_001
+        TRUSTRAIL_MERCHANT_NAME: Demo Merchant
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FRONTEND CI

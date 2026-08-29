@@ -17,6 +17,7 @@ from backend.adapters.ucp import router as ucp_router
 from backend.auth.auth import validate_auth_config
 from backend.db import models
 from backend.db.database import engine, get_db
+from backend.db.init import seed_demo_merchant
 from backend.routes.audit_log import router as audit_router
 from backend.routes.auth import router as auth_router
 from backend.routes.mandates import router as mandates_router
@@ -33,6 +34,7 @@ logging.basicConfig(
 
 # Auto-create tables on startup
 models.Base.metadata.create_all(bind=engine)
+seed_demo_merchant()  # Ensure mrc_demo_001 always exists for the test harness
 validate_auth_config()
 
 # Rate limiting setup

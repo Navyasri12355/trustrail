@@ -6,13 +6,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-# Skip API tests for now - they require full app initialization
-# which has rate limiter dependencies that don't work well in test context
-pytest.skip(
-    "API tests require full FastAPI app with rate limiter setup",
-    allow_module_level=True,
-)
-
 
 @pytest.fixture
 def test_merchant(db_session):
@@ -65,7 +58,7 @@ class TestManifestEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "protocol" in data or "version" in data
+        assert "schema_version" in data or "protocol" in data or "version" in data
 
 
 class TestMerchantEndpoints:

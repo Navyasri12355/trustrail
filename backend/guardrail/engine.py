@@ -98,7 +98,10 @@ def _rule_signature_valid(m: MandateData) -> RuleResult:
 
 def _rule_not_expired(m: MandateData) -> RuleResult:
     """Rule 2a — Mandate must not be expired."""
-    ok = datetime.now(tz=timezone.utc) < m.expires_at
+    # Normalize both sides to naive UTC to handle SQLite timezone-naive datetimes
+    now_naive = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    expires_naive = m.expires_at.replace(tzinfo=None)
+    ok = now_naive < expires_naive
     return RuleResult(
         rule="not_expired",
         passed=ok,
