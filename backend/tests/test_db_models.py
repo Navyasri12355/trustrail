@@ -4,8 +4,6 @@ Tests for database models (db/models.py).
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from backend.db.models import AuditLog, Mandate, Merchant
 
 

@@ -2,11 +2,9 @@
 Tests for FastAPI API endpoints.
 """
 
-import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi.testclient import TestClient
 
 # Skip API tests for now - they require full app initialization
 # which has rate limiter dependencies that don't work well in test context

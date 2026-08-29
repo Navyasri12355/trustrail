@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 # Set test environment variables before importing backend modules
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
@@ -18,8 +18,6 @@ os.environ["DASHBOARD_ADMIN_USERNAME"] = "admin"
 os.environ["DASHBOARD_ADMIN_PASSWORD"] = "admin123"
 
 from backend.db import models
-from backend.db.database import get_db
-
 
 # Test database setup
 TEST_DATABASE_URL = "sqlite:///./test.db"
@@ -45,9 +43,10 @@ def db_session():
 @pytest.fixture(scope="function")
 def sample_mandate_data():
     """Sample mandate data for testing."""
-    from backend.guardrail.engine import MandateData
-    from backend.crypto.keys import sign_payload
     import json
+
+    from backend.crypto.keys import sign_payload
+    from backend.guardrail.engine import MandateData
 
     # Create a valid signature for the mandate data
     mandate_payload = {

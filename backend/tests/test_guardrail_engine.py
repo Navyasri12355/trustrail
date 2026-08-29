@@ -5,11 +5,7 @@ Tests all 7 guardrail rules from PRD Section 6.3.
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from backend.guardrail.engine import (
-    MandateData,
-    PaymentRequest,
     RuleResult,
     validate,
 )

@@ -6,7 +6,12 @@ import os
 
 import pytest
 
-from backend.crypto.keys import get_signing_key, get_verify_key, sign_payload, verify_signature
+from backend.crypto.keys import (
+    get_signing_key,
+    get_verify_key,
+    sign_payload,
+    verify_signature,
+)
 
 
 class TestKeyLoading:
