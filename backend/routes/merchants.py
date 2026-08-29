@@ -8,8 +8,7 @@ DELETE /merchants/{id}     - Deactivate merchant (soft delete)
 """
 
 import uuid
-from datetime import datetime
-from typing import List
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -63,7 +62,7 @@ def _merchant_to_response(m: Merchant) -> MerchantResponse:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201, response_model=MerchantResponse)
-def create_merchant(body: CreateMerchantRequest, db: Session = Depends(get_db)):
+def create_merchant(body: CreateMerchantRequest, db: Session = Depends(get_db)):  # noqa: B008
     """
     Create a new merchant with their own Razorpay credentials.
     Each merchant operates in isolation - mandates, audit logs, and payments
@@ -83,7 +82,7 @@ def create_merchant(body: CreateMerchantRequest, db: Session = Depends(get_db)):
         razorpay_key_secret=body.razorpay_key_secret,
         currency=body.currency,
         active=True,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     
     db.add(merchant)
@@ -93,8 +92,8 @@ def create_merchant(body: CreateMerchantRequest, db: Session = Depends(get_db)):
     return _merchant_to_response(merchant)
 
 
-@router.get("", response_model=List[MerchantResponse])
-def list_merchants(db: Session = Depends(get_db)):
+@router.get("", response_model=list[MerchantResponse])
+def list_merchants(db: Session = Depends(get_db)):  # noqa: B008
     """
     List all merchants.
     In production, this should be restricted to admin users only.
@@ -104,7 +103,7 @@ def list_merchants(db: Session = Depends(get_db)):
 
 
 @router.get("/{merchant_id}", response_model=MerchantResponse)
-def get_merchant(merchant_id: str, db: Session = Depends(get_db)):
+def get_merchant(merchant_id: str, db: Session = Depends(get_db)):  # noqa: B008
     """Get merchant details by ID."""
     merchant = db.query(Merchant).filter(Merchant.merchant_id == merchant_id).first()
     if not merchant:
@@ -116,7 +115,7 @@ def get_merchant(merchant_id: str, db: Session = Depends(get_db)):
 def update_merchant(
     merchant_id: str,
     body: UpdateMerchantRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db)  # noqa: B008
 ):
     """
     Update merchant details.
@@ -144,7 +143,7 @@ def update_merchant(
 
 
 @router.delete("/{merchant_id}", status_code=200)
-def deactivate_merchant(merchant_id: str, db: Session = Depends(get_db)):
+def deactivate_merchant(merchant_id: str, db: Session = Depends(get_db)):  # noqa: B008
     """
     Deactivate a merchant (soft delete).
     Sets active=False. All existing mandates remain but new operations

@@ -11,25 +11,21 @@ Flow:
 """
 
 import json
-import os
-from datetime import datetime, timedelta
-from typing import List
+from datetime import datetime, timedelta, timezone
 
 import razorpay
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
 from backend.db.models import AuditLog, Mandate, Merchant
-from backend.guardrail import audit as audit_writer
-from backend.guardrail.engine import (
-    MandateData, PaymentRequest, RuleResult, validate
-)
 from backend.dependencies.tenant import get_merchant_from_header
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from backend.guardrail import audit as audit_writer
+from backend.guardrail.engine import MandateData, PaymentRequest, validate
 
 router = APIRouter(tags=["payments"])
 limiter = Limiter(key_func=get_remote_address)
@@ -67,7 +63,7 @@ class RuleResultOut(BaseModel):
 class PayResponse(BaseModel):
     allowed:          bool
     primary_reason:   str
-    rules:            List[RuleResultOut]
+    rules:            list[RuleResultOut]
     razorpay_order_id: str = None
     execution_token:  str = None
 
@@ -94,7 +90,7 @@ def _load_mandate_data(mandate: Mandate) -> MandateData:
 
 def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
     """Sum of approved payments for this mandate in the trailing 7 days."""
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     result = (
         db.query(func.sum(AuditLog.amount))
         .filter(
@@ -108,7 +104,7 @@ def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
     return float(result or 0.0)
 
 
-def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str]:
+def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> list[str]:
     """All nonces ever used under this mandate."""
     rows = (
         db.query(AuditLog.nonce)
@@ -128,8 +124,8 @@ def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str
 @limiter.limit("100/minute")  # Rate limit: 100 requests per minute per IP
 def pay(
     body: PayRequest,
-    merchant: Merchant = Depends(get_merchant_from_header),
-    db: Session = Depends(get_db)
+    merchant: Merchant = Depends(get_merchant_from_header),  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
 ):
     """
     Story-09: Agent-initiated payment request.
@@ -210,8 +206,8 @@ def pay(
         razorpay_order_id = order["id"]
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Razorpay error: {str(exc)}")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Razorpay error: {exc!s}")
 
     return PayResponse(
         allowed=True,

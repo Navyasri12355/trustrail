@@ -5,20 +5,18 @@ Story-05: Mandate revocation API — DELETE /mandates/{mandate_id}
 
 import json
 import uuid
-import os
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-
-from backend.db.database import get_db
-from backend.db.models import Mandate, Merchant
-from backend.crypto.keys import sign_payload
-from backend.dependencies.tenant import get_merchant_from_header
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.orm import Session
+
+from backend.crypto.keys import sign_payload
+from backend.db.database import get_db
+from backend.db.models import Mandate, Merchant
+from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter(prefix="/mandates", tags=["mandates"])
 limiter = Limiter(key_func=get_remote_address)
@@ -27,7 +25,7 @@ limiter = Limiter(key_func=get_remote_address)
 # ── Request / Response schemas ───────────────────────────────────────────────
 
 class MandateScope(BaseModel):
-    allowed_categories:  List[str] = Field(..., example=["groceries", "household"])
+    allowed_categories:  list[str] = Field(..., example=["groceries", "household"])
     max_per_transaction: float     = Field(..., gt=0, example=500.0)
     max_rolling_7d:      float     = Field(..., gt=0, example=2000.0)
     currency:            str       = Field(default="INR")
@@ -107,8 +105,8 @@ def _build_signable_payload(
 @limiter.limit("50/minute")  # Rate limit: 50 requests per minute per IP
 def create_mandate(
     body: CreateMandateRequest,
-    merchant: Merchant = Depends(get_merchant_from_header),
-    db: Session = Depends(get_db)
+    merchant: Merchant = Depends(get_merchant_from_header),  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
 ):
     """
     Story-04: Issue a new signed mandate.
@@ -116,7 +114,7 @@ def create_mandate(
     Rate limited: 50 requests per minute per IP.
     """
     mandate_id = "mnd_" + str(uuid.uuid4()).replace("-", "")
-    now        = datetime.utcnow()
+    now        = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=body.expires_in_days)
 
     scope_dict = {
@@ -177,8 +175,8 @@ def create_mandate(
 @router.get("/{mandate_id}", response_model=MandateResponse)
 def get_mandate(
     mandate_id: str,
-    merchant: Merchant = Depends(get_merchant_from_header),
-    db: Session = Depends(get_db)
+    merchant: Merchant = Depends(get_merchant_from_header),  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
 ):
     """Fetch a mandate by ID. Enforces tenant isolation."""
     mandate = db.query(Mandate).filter(
@@ -193,8 +191,8 @@ def get_mandate(
 @router.delete("/{mandate_id}", status_code=200)
 def revoke_mandate(
     mandate_id: str,
-    merchant: Merchant = Depends(get_merchant_from_header),
-    db: Session = Depends(get_db)
+    merchant: Merchant = Depends(get_merchant_from_header),  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
 ):
     """
     Story-05: Revoke a mandate — sets revoked=True.
