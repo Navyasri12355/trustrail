@@ -5,8 +5,7 @@ Provides JWT-based authentication for admin access.
 
 import logging
 import os
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -42,19 +41,21 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(tz=timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(tz=timezone.utc) + timedelta(
+            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+        )
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, _jwt_secret(), algorithm=ALGORITHM)
     return encoded_jwt
 
 
-def verify_token(token: str) -> Optional[dict]:
+def verify_token(token: str) -> dict | None:
     """Verify a JWT token and return the payload if valid."""
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[ALGORITHM])
@@ -93,13 +94,13 @@ def validate_auth_config() -> None:
         return
     msg = "Insecure dashboard auth config: " + "; ".join(issues)
     if env == "production":
-        raise RuntimeError(
-            msg + ". Refusing to start with TRUSTRAIL_ENV=production."
-        )
+        raise RuntimeError(msg + ". Refusing to start with TRUSTRAIL_ENV=production.")
     logger.warning("%s Allowed because TRUSTRAIL_ENV=%s.", msg, env)
 
 
 def admin_password_matches(plain_password: str) -> bool:
     """Constant-time-ish check against the env password (bcrypt)."""
-    hashed = get_password_hash(os.getenv("DASHBOARD_ADMIN_PASSWORD", _EXAMPLE_ADMIN_PASSWORD))
+    hashed = get_password_hash(
+        os.getenv("DASHBOARD_ADMIN_PASSWORD", _EXAMPLE_ADMIN_PASSWORD)
+    )
     return verify_password(plain_password, hashed)

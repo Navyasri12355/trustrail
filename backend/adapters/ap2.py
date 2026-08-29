@@ -12,9 +12,7 @@ protocol_origin is set to 'ap2' in the mandate.
 """
 
 import json
-import os
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
 
 import razorpay
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,21 +23,23 @@ from sqlalchemy.orm import Session
 from backend.crypto.keys import verify_signature
 from backend.db.database import get_db
 from backend.db.models import AuditLog, Mandate, Merchant
+from backend.dependencies.tenant import get_merchant_from_header
 from backend.guardrail import audit as audit_writer
 from backend.guardrail.engine import MandateData, PaymentRequest, validate
-from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter(prefix="/adapters/ap2", tags=["adapters"])
 
 
 # ── AP2-shaped request schema ─────────────────────────────────────────────────
 
+
 class AP2Scope(BaseModel):
     """AP2 mandate scope — mirrors our internal scope but uses AP2 field names."""
-    permitted_categories: List[str] = Field(..., example=["groceries"])
-    max_single_txn_inr:   float     = Field(..., gt=0, example=500.0)
-    max_7d_window_inr:    float     = Field(..., gt=0, example=2000.0)
-    currency:             str       = Field(default="INR")
+
+    permitted_categories: list[str] = Field(..., example=["groceries"])
+    max_single_txn_inr: float = Field(..., gt=0, example=500.0)
+    max_7d_window_inr: float = Field(..., gt=0, example=2000.0)
+    currency: str = Field(default="INR")
 
 
 class AP2MandateCredential(BaseModel):
@@ -49,38 +49,44 @@ class AP2MandateCredential(BaseModel):
     We use an Ed25519 hex signature over the canonical JSON as a stand-in.
     See docs/uap-mapping.md for the AP2 → TrustRail field mapping.
     """
-    mandate_id:     str       = Field(..., example="mnd_abc123")
-    issuer_did:     str       = Field(..., example="did:example:usr_123")  # maps to issuer_user_id
-    agent_did:      str       = Field(..., example="did:example:agent_abc")
-    merchant_id:    str       = Field(..., example="mrc_demo_001")
-    scope:          AP2Scope
-    issued_at:      str       = Field(..., example="2026-08-22T10:00:00Z")
-    expires_at:     str       = Field(..., example="2026-09-22T10:00:00Z")
-    proof:          str       = Field(..., example="ed25519:<hex>")  # AP2 VC proof field
+
+    mandate_id: str = Field(..., example="mnd_abc123")
+    issuer_did: str = Field(
+        ..., example="did:example:usr_123"
+    )  # maps to issuer_user_id
+    agent_did: str = Field(..., example="did:example:agent_abc")
+    merchant_id: str = Field(..., example="mrc_demo_001")
+    scope: AP2Scope
+    issued_at: str = Field(..., example="2026-08-22T10:00:00Z")
+    expires_at: str = Field(..., example="2026-09-22T10:00:00Z")
+    proof: str = Field(..., example="ed25519:<hex>")  # AP2 VC proof field
 
 
 class AP2IntentRequest(BaseModel):
     """Full AP2 payment intent — the mandate credential + the specific payment request."""
-    credential:  AP2MandateCredential
-    amount_inr:  float = Field(..., gt=0, example=299.0)
-    category:    str   = Field(..., example="groceries")
-    nonce:       str   = Field(..., example="ap2_nonce_001")
+
+    credential: AP2MandateCredential
+    amount_inr: float = Field(..., gt=0, example=299.0)
+    category: str = Field(..., example="groceries")
+    nonce: str = Field(..., example="ap2_nonce_001")
 
 
 # ── AP2-shaped response ───────────────────────────────────────────────────────
 
+
 class AP2IntentResponse(BaseModel):
-    ap2_version:       str = "ap2-draft-2025"
-    status:            str          # "approved" | "blocked"
-    mandate_id:        str
-    decision_reason:   str
-    razorpay_order_id: Optional[str] = None
-    execution_token:   Optional[str] = None
-    proof_verified:    bool
-    rules_summary:     list
+    ap2_version: str = "ap2-draft-2025"
+    status: str  # "approved" | "blocked"
+    mandate_id: str
+    decision_reason: str
+    razorpay_order_id: str | None = None
+    execution_token: str | None = None
+    proof_verified: bool
+    rules_summary: list
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _verify_ap2_proof(cred: AP2MandateCredential) -> bool:
     """
@@ -92,45 +98,56 @@ def _verify_ap2_proof(cred: AP2MandateCredential) -> bool:
     NOTE: This is documented as a stand-in in docs/uap-mapping.md.
     """
     payload_dict = {
-        "mandate_id":  cred.mandate_id,
-        "issuer_did":  cred.issuer_did,
-        "agent_did":   cred.agent_did,
+        "mandate_id": cred.mandate_id,
+        "issuer_did": cred.issuer_did,
+        "agent_did": cred.agent_did,
         "merchant_id": cred.merchant_id,
         "scope": {
             "permitted_categories": cred.scope.permitted_categories,
-            "max_single_txn_inr":   cred.scope.max_single_txn_inr,
-            "max_7d_window_inr":    cred.scope.max_7d_window_inr,
-            "currency":             cred.scope.currency,
+            "max_single_txn_inr": cred.scope.max_single_txn_inr,
+            "max_7d_window_inr": cred.scope.max_7d_window_inr,
+            "currency": cred.scope.currency,
         },
-        "issued_at":  cred.issued_at,
+        "issued_at": cred.issued_at,
         "expires_at": cred.expires_at,
     }
-    payload_bytes = json.dumps(payload_dict, sort_keys=True, separators=(",", ":")).encode()
+    payload_bytes = json.dumps(
+        payload_dict, sort_keys=True, separators=(",", ":")
+    ).encode()
     return verify_signature(payload_bytes, cred.proof)
 
 
-def _ap2_to_mandate_data(cred: AP2MandateCredential, db: Session, merchant_id: str) -> MandateData:
+def _ap2_to_mandate_data(
+    cred: AP2MandateCredential, db: Session, merchant_id: str
+) -> MandateData:
     """
     Map AP2 credential fields → TrustRail MandateData.
     Field mapping is documented in docs/uap-mapping.md.
     Enforces tenant isolation.
     """
     # Look up the stored mandate to get the server-side signature
-    mandate_row = db.query(Mandate).filter(
-        Mandate.mandate_id == cred.mandate_id,
-        Mandate.merchant_id == merchant_id
-    ).first()
+    mandate_row = (
+        db.query(Mandate)
+        .filter(
+            Mandate.mandate_id == cred.mandate_id, Mandate.merchant_id == merchant_id
+        )
+        .first()
+    )
     if not mandate_row:
-        raise HTTPException(status_code=404, detail=f"Mandate {cred.mandate_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Mandate {cred.mandate_id} not found"
+        )
 
     return MandateData(
         mandate_id=mandate_row.mandate_id,
-        issuer_user_id=mandate_row.issuer_user_id,   # AP2: issuer_did
-        agent_id=mandate_row.agent_id,               # AP2: agent_did
+        issuer_user_id=mandate_row.issuer_user_id,  # AP2: issuer_did
+        agent_id=mandate_row.agent_id,  # AP2: agent_did
         merchant_id=mandate_row.merchant_id,
-        allowed_categories=json.loads(mandate_row.allowed_categories),  # AP2: permitted_categories
-        max_per_transaction=mandate_row.max_per_transaction,            # AP2: max_single_txn_inr
-        max_rolling_7d=mandate_row.max_rolling_7d,                      # AP2: max_7d_window_inr
+        allowed_categories=json.loads(
+            mandate_row.allowed_categories
+        ),  # AP2: permitted_categories
+        max_per_transaction=mandate_row.max_per_transaction,  # AP2: max_single_txn_inr
+        max_rolling_7d=mandate_row.max_rolling_7d,  # AP2: max_7d_window_inr
         currency=mandate_row.currency,
         issued_at=mandate_row.issued_at,
         expires_at=mandate_row.expires_at,
@@ -141,27 +158,27 @@ def _ap2_to_mandate_data(cred: AP2MandateCredential, db: Session, merchant_id: s
 
 
 def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=7)
     result = (
         db.query(func.sum(AuditLog.amount))
         .filter(
             AuditLog.mandate_id == mandate_id,
             AuditLog.merchant_id == merchant_id,
             AuditLog.decision == "ALLOW",
-            AuditLog.created_at >= cutoff
+            AuditLog.created_at >= cutoff,
         )
         .scalar()
     )
     return float(result or 0.0)
 
 
-def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str]:
+def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> list[str]:
     rows = (
         db.query(AuditLog.nonce)
         .filter(
             AuditLog.mandate_id == mandate_id,
             AuditLog.merchant_id == merchant_id,
-            AuditLog.nonce.isnot(None)
+            AuditLog.nonce.isnot(None),
         )
         .all()
     )
@@ -170,11 +187,12 @@ def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str
 
 # ── Route ─────────────────────────────────────────────────────────────────────
 
+
 @router.post("/intent", response_model=AP2IntentResponse)
 def ap2_intent(
     body: AP2IntentRequest,
     merchant: Merchant = Depends(get_merchant_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Story-11: AP2 adapter.
@@ -202,7 +220,7 @@ def ap2_intent(
     )
 
     # 3. Guardrail
-    spent_7d    = _get_spent_7d(db, body.credential.mandate_id, merchant.merchant_id)
+    spent_7d = _get_spent_7d(db, body.credential.mandate_id, merchant.merchant_id)
     seen_nonces = _get_seen_nonces(db, body.credential.mandate_id, merchant.merchant_id)
 
     decision = validate(
@@ -224,8 +242,7 @@ def ap2_intent(
     )
 
     rules_summary = [
-        {"rule": r.rule, "passed": r.passed, "reason": r.reason}
-        for r in decision.rules
+        {"rule": r.rule, "passed": r.passed, "reason": r.reason} for r in decision.rules
     ]
 
     # 5a. BLOCK
@@ -239,24 +256,28 @@ def ap2_intent(
         )
 
     # 5b. ALLOW → Razorpay
-    rz = razorpay.Client(auth=(
-        merchant.razorpay_key_id,
-        merchant.razorpay_key_secret,
-    ))
-    order = rz.order.create({
-        "amount":   int(body.amount_inr * 100),
-        "currency": merchant.currency,
-        "receipt":  f"ap2_{body.nonce[:16]}",
-        "notes": {
-            "mandate_id":      body.credential.mandate_id,
-            "issuer_did":      body.credential.issuer_did,
-            "agent_did":       body.credential.agent_did,
-            "category":        body.category,
-            "protocol":        "ap2-draft-2025",
-            "execution_token": decision.execution_token,
-            "merchant_id":     merchant.merchant_id,
-        },
-    })
+    rz = razorpay.Client(
+        auth=(
+            merchant.razorpay_key_id,
+            merchant.razorpay_key_secret,
+        )
+    )
+    order = rz.order.create(
+        {
+            "amount": int(body.amount_inr * 100),
+            "currency": merchant.currency,
+            "receipt": f"ap2_{body.nonce[:16]}",
+            "notes": {
+                "mandate_id": body.credential.mandate_id,
+                "issuer_did": body.credential.issuer_did,
+                "agent_did": body.credential.agent_did,
+                "category": body.category,
+                "protocol": "ap2-draft-2025",
+                "execution_token": decision.execution_token,
+                "merchant_id": merchant.merchant_id,
+            },
+        }
+    )
 
     return AP2IntentResponse(
         status="approved",

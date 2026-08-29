@@ -5,8 +5,6 @@ Requires authentication for dashboard access.
 Enforces tenant isolation - returns only audit logs for the specified merchant.
 """
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -21,29 +19,29 @@ router = APIRouter(tags=["audit"])
 
 
 class AuditEntryOut(BaseModel):
-    id:           str
-    mandate_id:   Optional[str]
-    merchant_id:  Optional[str]
-    event_type:   str
-    decision:     Optional[str]
-    rules_checked: Optional[str]
-    reason:       Optional[str]
-    amount:       Optional[float]
-    category:     Optional[str]
-    nonce:        Optional[str]
-    created_at:   str
-    prev_hash:    str
-    row_hash:     str
+    id: str
+    mandate_id: str | None
+    merchant_id: str | None
+    event_type: str
+    decision: str | None
+    rules_checked: str | None
+    reason: str | None
+    amount: float | None
+    category: str | None
+    nonce: str | None
+    created_at: str
+    prev_hash: str
+    row_hash: str
 
 
 class ChainVerifyOut(BaseModel):
-    intact:        bool
-    rows_checked:  int
-    break_at:      Optional[str]
-    detail:        str
+    intact: bool
+    rows_checked: int
+    break_at: str | None
+    detail: str
 
 
-@router.get("/audit-log", response_model=List[AuditEntryOut])
+@router.get("/audit-log", response_model=list[AuditEntryOut])
 def get_audit_log(
     merchant: Merchant = Depends(get_merchant_from_header),
     db: Session = Depends(get_db),
@@ -53,9 +51,12 @@ def get_audit_log(
     Return the audit trail for the specified merchant in chronological order.
     Requires X-Merchant-ID header and a dashboard JWT.
     """
-    rows = db.query(AuditLog).filter(
-        AuditLog.merchant_id == merchant.merchant_id
-    ).order_by(AuditLog.created_at.asc()).all()
+    rows = (
+        db.query(AuditLog)
+        .filter(AuditLog.merchant_id == merchant.merchant_id)
+        .order_by(AuditLog.created_at.asc())
+        .all()
+    )
     return [
         AuditEntryOut(
             id=r.id,

@@ -3,8 +3,8 @@ DB init script — run once to create all tables.
 Usage: python -m backend.db.init
 """
 
+from backend.db import models
 from backend.db.database import engine
-from backend.db import models  # noqa: F401 — imports needed for Base.metadata
 
 
 def init_db():

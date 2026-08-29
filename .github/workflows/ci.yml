@@ -6,67 +6,121 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BACKEND CI
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
   backend-ci:
+    name: Backend – lint, type-check, tests
     runs-on: ubuntu-latest
-    
+
     defaults:
       run:
         working-directory: ./backend
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
-    
+
     - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-    
+      run: pip install -r requirements.txt
+
     - name: Run linter (ruff)
-      run: |
-        ruff check .
-    
+      run: ruff check .
+
     - name: Check code formatting (black)
-      run: |
-        black --check .
-    
+      run: black --check .
+
     - name: Type check (mypy)
-      run: |
-        mypy . --ignore-missing-imports --no-error-summary || true
-    
+      # --no-error-summary keeps output readable; errors are still surfaced
+      run: mypy . --ignore-missing-imports --no-error-summary
+
     - name: Run unit tests
-      run: |
-        pytest tests/ -v --tb=short || true
+      # Fail the job if any test fails (no || true)
+      run: pytest tests/ -v --tb=short
       env:
         DATABASE_URL: sqlite:///./test.db
-        ED25519_PRIVATE_KEY_HEX: test_private_key_32_bytes_hex_here
-        ED25519_PUBLIC_KEY_HEX: test_public_key_32_bytes_hex_here
-        JWT_SECRET_KEY: test_secret_key_for_ci
+        ED25519_PRIVATE_KEY_HEX: "0000000000000000000000000000000000000000000000000000000000000001"
+        ED25519_PUBLIC_KEY_HEX: "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29"
+        JWT_SECRET_KEY: test_secret_key_for_ci_min_32_chars_long
         DASHBOARD_ADMIN_USERNAME: admin
         DASHBOARD_ADMIN_PASSWORD: admin123
-    
+
     - name: Run adversarial test harness
+      # Must run from the repo root so 'from agent.harness import …' resolves
+      working-directory: .
       run: |
         python -c "
         import sys
-        sys.path.insert(0, '..')
         from agent.harness import run_all
         results = run_all()
-        sys.exit(0 if all(r.passed for r in results) else 1)
+        failed = [r for r in results if not r.passed]
+        if failed:
+            for r in failed:
+                print(f'FAIL: {r}', file=sys.stderr)
+            sys.exit(1)
+        print(f'All {len(results)} harness scenarios passed.')
         "
       env:
         DATABASE_URL: sqlite:///./test.db
         RAZORPAY_KEY_ID: rzp_test_ci_key
         RAZORPAY_KEY_SECRET: rzp_test_ci_secret
-        ED25519_PRIVATE_KEY_HEX: test_private_key_32_bytes_hex_here
-        ED25519_PUBLIC_KEY_HEX: test_public_key_32_bytes_hex_here
-        JWT_SECRET_KEY: test_secret_key_for_ci
+        ED25519_PRIVATE_KEY_HEX: "0000000000000000000000000000000000000000000000000000000000000001"
+        ED25519_PUBLIC_KEY_HEX: "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29"
+        JWT_SECRET_KEY: test_secret_key_for_ci_min_32_chars_long
         DASHBOARD_ADMIN_USERNAME: admin
         DASHBOARD_ADMIN_PASSWORD: admin123
         HARNESS_MERCHANT_ID: mrc_demo_001
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FRONTEND CI
+# ─────────────────────────────────────────────────────────────────────────────
+  frontend-ci:
+    name: Frontend – lint, test, build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Lint (oxlint)
+      run: npm run lint
+
+    - name: Unit tests (vitest)
+      run: npm test
+
+    - name: Upload coverage report
+      # Only upload on push to main/develop, not on every PR
+      if: github.event_name == 'push'
+      uses: actions/upload-artifact@v4
+      with:
+        name: frontend-coverage
+        path: frontend/coverage/
+        retention-days: 14
+
+    - name: Build (vite)
+      # Verify the production bundle compiles without errors
+      run: npm run build
+      env:
+        # Vite replaces this at build time; set to a placeholder for CI
+        VITE_API_URL: http://localhost:8000

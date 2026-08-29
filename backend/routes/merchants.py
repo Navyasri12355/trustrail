@@ -22,6 +22,7 @@ router = APIRouter(prefix="/merchants", tags=["merchants"])
 
 # ── Request / Response schemas ───────────────────────────────────────────────
 
+
 class CreateMerchantRequest(BaseModel):
     merchant_name: str = Field(..., example="Acme Corp")
     razorpay_key_id: str = Field(..., example="rzp_test_XXXXXXXXXXXXXXXX")
@@ -48,6 +49,7 @@ class MerchantResponse(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _merchant_to_response(m: Merchant) -> MerchantResponse:
     return MerchantResponse(
         merchant_id=m.merchant_id,
@@ -61,20 +63,23 @@ def _merchant_to_response(m: Merchant) -> MerchantResponse:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @router.post("", status_code=201, response_model=MerchantResponse)
-def create_merchant(body: CreateMerchantRequest, db: Session = Depends(get_db)):  # noqa: B008
+def create_merchant(body: CreateMerchantRequest, db: Session = Depends(get_db)):
     """
     Create a new merchant with their own Razorpay credentials.
     Each merchant operates in isolation - mandates, audit logs, and payments
     are scoped to their merchant_id.
     """
     merchant_id = "mrc_" + str(uuid.uuid4()).replace("-", "")
-    
+
     # Check if merchant name already exists
-    existing = db.query(Merchant).filter(Merchant.merchant_name == body.merchant_name).first()
+    existing = (
+        db.query(Merchant).filter(Merchant.merchant_name == body.merchant_name).first()
+    )
     if existing:
         raise HTTPException(status_code=400, detail="Merchant name already exists")
-    
+
     merchant = Merchant(
         merchant_id=merchant_id,
         merchant_name=body.merchant_name,
@@ -84,16 +89,16 @@ def create_merchant(body: CreateMerchantRequest, db: Session = Depends(get_db)):
         active=True,
         created_at=datetime.now(timezone.utc),
     )
-    
+
     db.add(merchant)
     db.commit()
     db.refresh(merchant)
-    
+
     return _merchant_to_response(merchant)
 
 
 @router.get("", response_model=list[MerchantResponse])
-def list_merchants(db: Session = Depends(get_db)):  # noqa: B008
+def list_merchants(db: Session = Depends(get_db)):
     """
     List all merchants.
     In production, this should be restricted to admin users only.
@@ -103,7 +108,7 @@ def list_merchants(db: Session = Depends(get_db)):  # noqa: B008
 
 
 @router.get("/{merchant_id}", response_model=MerchantResponse)
-def get_merchant(merchant_id: str, db: Session = Depends(get_db)):  # noqa: B008
+def get_merchant(merchant_id: str, db: Session = Depends(get_db)):
     """Get merchant details by ID."""
     merchant = db.query(Merchant).filter(Merchant.merchant_id == merchant_id).first()
     if not merchant:
@@ -113,9 +118,7 @@ def get_merchant(merchant_id: str, db: Session = Depends(get_db)):  # noqa: B008
 
 @router.put("/{merchant_id}", response_model=MerchantResponse)
 def update_merchant(
-    merchant_id: str,
-    body: UpdateMerchantRequest,
-    db: Session = Depends(get_db)  # noqa: B008
+    merchant_id: str, body: UpdateMerchantRequest, db: Session = Depends(get_db)
 ):
     """
     Update merchant details.
@@ -124,7 +127,7 @@ def update_merchant(
     merchant = db.query(Merchant).filter(Merchant.merchant_id == merchant_id).first()
     if not merchant:
         raise HTTPException(status_code=404, detail="Merchant not found")
-    
+
     if body.merchant_name is not None:
         merchant.merchant_name = body.merchant_name
     if body.razorpay_key_id is not None:
@@ -135,15 +138,15 @@ def update_merchant(
         merchant.currency = body.currency
     if body.active is not None:
         merchant.active = body.active
-    
+
     db.commit()
     db.refresh(merchant)
-    
+
     return _merchant_to_response(merchant)
 
 
 @router.delete("/{merchant_id}", status_code=200)
-def deactivate_merchant(merchant_id: str, db: Session = Depends(get_db)):  # noqa: B008
+def deactivate_merchant(merchant_id: str, db: Session = Depends(get_db)):
     """
     Deactivate a merchant (soft delete).
     Sets active=False. All existing mandates remain but new operations
@@ -152,12 +155,12 @@ def deactivate_merchant(merchant_id: str, db: Session = Depends(get_db)):  # noq
     merchant = db.query(Merchant).filter(Merchant.merchant_id == merchant_id).first()
     if not merchant:
         raise HTTPException(status_code=404, detail="Merchant not found")
-    
+
     merchant.active = False
     db.commit()
-    
+
     return {
         "merchant_id": merchant_id,
         "active": False,
-        "message": "Merchant deactivated successfully"
+        "message": "Merchant deactivated successfully",
     }

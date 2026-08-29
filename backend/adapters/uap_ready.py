@@ -19,9 +19,7 @@ UAP field status (CONFIRMED / ANTICIPATED) is unchanged — see that doc.
 """
 
 import json
-import os
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
 
 import razorpay
 from fastapi import APIRouter, Depends, HTTPException
@@ -32,14 +30,15 @@ from sqlalchemy.orm import Session
 from backend.crypto.keys import verify_signature
 from backend.db.database import get_db
 from backend.db.models import AuditLog, Mandate, Merchant
+from backend.dependencies.tenant import get_merchant_from_header
 from backend.guardrail import audit as audit_writer
 from backend.guardrail.engine import MandateData, PaymentRequest, validate
-from backend.dependencies.tenant import get_merchant_from_header
 
 router = APIRouter(prefix="/adapters/uap", tags=["adapters"])
 
 
 # ── UAP-shaped request schema (anticipated, not confirmed) ────────────────────
+
 
 class UAPDelegationToken(BaseModel):
     """
@@ -50,49 +49,71 @@ class UAPDelegationToken(BaseModel):
       CONFIRMED   — explicitly reported in NPCI/RBI public briefings
       ANTICIPATED — inferred from UPI architecture / design intent
     """
-    delegation_id:       str   = Field(..., description="UAP delegation ID (ANTICIPATED)")
-    agent_registry_id:   str   = Field(..., description="NPCI agent registry ID (ANTICIPATED)")
-    delegator_vpa:       str   = Field(..., description="UPI VPA of the delegating user (CONFIRMED — UPI identity model)")
-    merchant_vpa:        str   = Field(..., description="Target merchant UPI VPA (CONFIRMED — UPI merchant model)")
+
+    delegation_id: str = Field(..., description="UAP delegation ID (ANTICIPATED)")
+    agent_registry_id: str = Field(
+        ..., description="NPCI agent registry ID (ANTICIPATED)"
+    )
+    delegator_vpa: str = Field(
+        ...,
+        description="UPI VPA of the delegating user (CONFIRMED — UPI identity model)",
+    )
+    merchant_vpa: str = Field(
+        ..., description="Target merchant UPI VPA (CONFIRMED — UPI merchant model)"
+    )
     # Spend limits — CONFIRMED from public reporting
-    max_per_txn_inr:     float = Field(..., description="Per-transaction cap (CONFIRMED in reports)")
-    max_rolling_inr:     float = Field(..., description="Rolling window cap (CONFIRMED in reports)")
-    permitted_categories: List[str] = Field(..., description="Allowed spend categories (CONFIRMED)")
-    validity_seconds:    int   = Field(..., description="Token validity window in seconds (ANTICIPATED)")
-    issued_at_utc:       str   = Field(..., description="Token issue timestamp ISO-8601 (ANTICIPATED)")
+    max_per_txn_inr: float = Field(
+        ..., description="Per-transaction cap (CONFIRMED in reports)"
+    )
+    max_rolling_inr: float = Field(
+        ..., description="Rolling window cap (CONFIRMED in reports)"
+    )
+    permitted_categories: list[str] = Field(
+        ..., description="Allowed spend categories (CONFIRMED)"
+    )
+    validity_seconds: int = Field(
+        ..., description="Token validity window in seconds (ANTICIPATED)"
+    )
+    issued_at_utc: str = Field(
+        ..., description="Token issue timestamp ISO-8601 (ANTICIPATED)"
+    )
     # Signature — ANTICIPATED; stand-in uses Ed25519 (same as AP2 adapter)
-    uap_signature:       str   = Field(..., description="NPCI-issued token signature (ANTICIPATED — Ed25519 stand-in)")
+    uap_signature: str = Field(
+        ..., description="NPCI-issued token signature (ANTICIPATED — Ed25519 stand-in)"
+    )
 
 
 class UAPPaymentIntent(BaseModel):
     """UAP payment intent submitted by an AI agent."""
-    delegation_token:    UAPDelegationToken
+
+    delegation_token: UAPDelegationToken
     # Bridge field: TrustRail mandate that corresponds to this UAP delegation.
     # Needed because UAP's delegation model maps to TrustRail's mandate schema.
-    internal_mandate_id: str   = Field(
-        ...,
-        description="TrustRail mandate_id corresponding to this UAP delegation"
+    internal_mandate_id: str = Field(
+        ..., description="TrustRail mandate_id corresponding to this UAP delegation"
     )
-    amount_inr:          float = Field(..., gt=0)
-    category:            str
-    nonce:               str
+    amount_inr: float = Field(..., gt=0)
+    category: str
+    nonce: str
 
 
 # ── UAP-shaped response schema ────────────────────────────────────────────────
 
+
 class UAPIntentResponse(BaseModel):
-    uap_version:         str = "uap-trustrail-v1"
-    status:              str          # "approved" | "blocked"
-    mandate_id:          str
-    decision_reason:     str
-    razorpay_order_id:   Optional[str] = None
-    execution_token:     Optional[str] = None
-    token_verified:      bool
-    rules_summary:       list
-    field_mapping:       dict         # educational: shows UAP → TrustRail translation
+    uap_version: str = "uap-trustrail-v1"
+    status: str  # "approved" | "blocked"
+    mandate_id: str
+    decision_reason: str
+    razorpay_order_id: str | None = None
+    execution_token: str | None = None
+    token_verified: bool
+    rules_summary: list
+    field_mapping: dict  # educational: shows UAP → TrustRail translation
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _verify_uap_token(token: UAPDelegationToken, mandate: Mandate) -> bool:
     """
@@ -107,21 +128,25 @@ def _verify_uap_token(token: UAPDelegationToken, mandate: Mandate) -> bool:
     mandates at issuance. This is identical to the AP2 adapter's stand-in.
     """
     payload_dict = {
-        "delegation_id":       token.delegation_id,
-        "agent_registry_id":   token.agent_registry_id,
-        "delegator_vpa":       token.delegator_vpa,
-        "merchant_vpa":        token.merchant_vpa,
-        "max_per_txn_inr":     token.max_per_txn_inr,
-        "max_rolling_inr":     token.max_rolling_inr,
+        "delegation_id": token.delegation_id,
+        "agent_registry_id": token.agent_registry_id,
+        "delegator_vpa": token.delegator_vpa,
+        "merchant_vpa": token.merchant_vpa,
+        "max_per_txn_inr": token.max_per_txn_inr,
+        "max_rolling_inr": token.max_rolling_inr,
         "permitted_categories": token.permitted_categories,
-        "validity_seconds":    token.validity_seconds,
-        "issued_at_utc":       token.issued_at_utc,
+        "validity_seconds": token.validity_seconds,
+        "issued_at_utc": token.issued_at_utc,
     }
-    payload_bytes = json.dumps(payload_dict, sort_keys=True, separators=(",", ":")).encode()
+    payload_bytes = json.dumps(
+        payload_dict, sort_keys=True, separators=(",", ":")
+    ).encode()
     return verify_signature(payload_bytes, token.uap_signature)
 
 
-def _uap_to_mandate_data(token: UAPDelegationToken, mandate: Mandate, merchant_id: str) -> MandateData:
+def _uap_to_mandate_data(
+    token: UAPDelegationToken, mandate: Mandate, merchant_id: str
+) -> MandateData:
     """
     Map UAP delegation token fields → TrustRail MandateData.
     Full field mapping documented in docs/uap-mapping.md.
@@ -129,13 +154,15 @@ def _uap_to_mandate_data(token: UAPDelegationToken, mandate: Mandate, merchant_i
     """
     return MandateData(
         mandate_id=mandate.mandate_id,
-        issuer_user_id=mandate.issuer_user_id,      # UAP: delegator_vpa (CONFIRMED)
-        agent_id=mandate.agent_id,                   # UAP: agent_registry_id (ANTICIPATED)
-        merchant_id=mandate.merchant_id,             # UAP: merchant_vpa (CONFIRMED)
-        allowed_categories=json.loads(mandate.allowed_categories),  # UAP: permitted_categories (CONFIRMED)
-        max_per_transaction=mandate.max_per_transaction,            # UAP: max_per_txn_inr (CONFIRMED)
-        max_rolling_7d=mandate.max_rolling_7d,                      # UAP: max_rolling_inr (CONFIRMED)
-        currency=mandate.currency,                   # INR — UPI is INR-only (CONFIRMED)
+        issuer_user_id=mandate.issuer_user_id,  # UAP: delegator_vpa (CONFIRMED)
+        agent_id=mandate.agent_id,  # UAP: agent_registry_id (ANTICIPATED)
+        merchant_id=mandate.merchant_id,  # UAP: merchant_vpa (CONFIRMED)
+        allowed_categories=json.loads(
+            mandate.allowed_categories
+        ),  # UAP: permitted_categories (CONFIRMED)
+        max_per_transaction=mandate.max_per_transaction,  # UAP: max_per_txn_inr (CONFIRMED)
+        max_rolling_7d=mandate.max_rolling_7d,  # UAP: max_rolling_inr (CONFIRMED)
+        currency=mandate.currency,  # INR — UPI is INR-only (CONFIRMED)
         issued_at=mandate.issued_at,
         expires_at=mandate.expires_at,
         revoked=mandate.revoked,
@@ -145,13 +172,13 @@ def _uap_to_mandate_data(token: UAPDelegationToken, mandate: Mandate, merchant_i
 
 
 def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=7)
     result = (
         db.query(func.sum(AuditLog.amount))
         .filter(
             AuditLog.mandate_id == mandate_id,
             AuditLog.merchant_id == merchant_id,
-            AuditLog.decision   == "ALLOW",
+            AuditLog.decision == "ALLOW",
             AuditLog.created_at >= cutoff,
         )
         .scalar()
@@ -159,13 +186,13 @@ def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
     return float(result or 0.0)
 
 
-def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str]:
+def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> list[str]:
     rows = (
         db.query(AuditLog.nonce)
         .filter(
             AuditLog.mandate_id == mandate_id,
             AuditLog.merchant_id == merchant_id,
-            AuditLog.nonce.isnot(None)
+            AuditLog.nonce.isnot(None),
         )
         .all()
     )
@@ -175,25 +202,60 @@ def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str) -> List[str
 def _build_field_mapping(token: UAPDelegationToken, mandate_id: str) -> dict:
     """Returns the UAP → TrustRail field translation for transparency."""
     return {
-        "mandate_id":           {"uap_field": "delegation_id",        "status": "ANTICIPATED", "value": mandate_id},
-        "issuer_user_id":       {"uap_field": "delegator_vpa",        "status": "CONFIRMED",   "value": f"upi:{token.delegator_vpa}"},
-        "agent_id":             {"uap_field": "agent_registry_id",    "status": "ANTICIPATED", "value": token.agent_registry_id},
-        "merchant_id":          {"uap_field": "merchant_vpa",         "status": "CONFIRMED",   "value": f"upi:{token.merchant_vpa}"},
-        "allowed_categories":   {"uap_field": "permitted_categories", "status": "CONFIRMED",   "value": token.permitted_categories},
-        "max_per_transaction":  {"uap_field": "max_per_txn_inr",      "status": "CONFIRMED",   "value": token.max_per_txn_inr},
-        "max_rolling_7d":       {"uap_field": "max_rolling_inr",      "status": "CONFIRMED",   "value": token.max_rolling_inr},
-        "currency":             {"uap_field": "implicit (UPI=INR)",   "status": "CONFIRMED",   "value": "INR"},
-        "signature_stand_in":   {"note": "Ed25519 stand-in — replace with NPCI token scheme when spec ships"},
+        "mandate_id": {
+            "uap_field": "delegation_id",
+            "status": "ANTICIPATED",
+            "value": mandate_id,
+        },
+        "issuer_user_id": {
+            "uap_field": "delegator_vpa",
+            "status": "CONFIRMED",
+            "value": f"upi:{token.delegator_vpa}",
+        },
+        "agent_id": {
+            "uap_field": "agent_registry_id",
+            "status": "ANTICIPATED",
+            "value": token.agent_registry_id,
+        },
+        "merchant_id": {
+            "uap_field": "merchant_vpa",
+            "status": "CONFIRMED",
+            "value": f"upi:{token.merchant_vpa}",
+        },
+        "allowed_categories": {
+            "uap_field": "permitted_categories",
+            "status": "CONFIRMED",
+            "value": token.permitted_categories,
+        },
+        "max_per_transaction": {
+            "uap_field": "max_per_txn_inr",
+            "status": "CONFIRMED",
+            "value": token.max_per_txn_inr,
+        },
+        "max_rolling_7d": {
+            "uap_field": "max_rolling_inr",
+            "status": "CONFIRMED",
+            "value": token.max_rolling_inr,
+        },
+        "currency": {
+            "uap_field": "implicit (UPI=INR)",
+            "status": "CONFIRMED",
+            "value": "INR",
+        },
+        "signature_stand_in": {
+            "note": "Ed25519 stand-in — replace with NPCI token scheme when spec ships"
+        },
     }
 
 
 # ── Route ─────────────────────────────────────────────────────────────────────
 
+
 @router.post("/intent", response_model=UAPIntentResponse)
 def uap_intent(
     body: UAPPaymentIntent,
     merchant: Merchant = Depends(get_merchant_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Story-12 (upgraded): Functional UAP adapter.
@@ -213,18 +275,26 @@ def uap_intent(
     Enforces tenant isolation.
     """
     # 1. Load stored mandate with tenant isolation
-    mandate_row = db.query(Mandate).filter(
-        Mandate.mandate_id == body.internal_mandate_id,
-        Mandate.merchant_id == merchant.merchant_id
-    ).first()
+    mandate_row = (
+        db.query(Mandate)
+        .filter(
+            Mandate.mandate_id == body.internal_mandate_id,
+            Mandate.merchant_id == merchant.merchant_id,
+        )
+        .first()
+    )
     if not mandate_row:
-        raise HTTPException(status_code=404, detail=f"Mandate {body.internal_mandate_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Mandate {body.internal_mandate_id} not found"
+        )
 
     # 2. Verify UAP delegation token (Ed25519 stand-in)
     token_verified = _verify_uap_token(body.delegation_token, mandate_row)
 
     # 3. Map UAP → internal MandateData
-    mandate_data = _uap_to_mandate_data(body.delegation_token, mandate_row, merchant.merchant_id)
+    mandate_data = _uap_to_mandate_data(
+        body.delegation_token, mandate_row, merchant.merchant_id
+    )
 
     payment_req = PaymentRequest(
         mandate_id=body.internal_mandate_id,
@@ -235,7 +305,7 @@ def uap_intent(
     )
 
     # 4. Run full guardrail (all 7 rules, no short-circuit)
-    spent_7d    = _get_spent_7d(db, body.internal_mandate_id, merchant.merchant_id)
+    spent_7d = _get_spent_7d(db, body.internal_mandate_id, merchant.merchant_id)
     seen_nonces = _get_seen_nonces(db, body.internal_mandate_id, merchant.merchant_id)
 
     decision = validate(
@@ -256,10 +326,11 @@ def uap_intent(
         nonce=body.nonce,
     )
 
-    field_mapping = _build_field_mapping(body.delegation_token, body.internal_mandate_id)
+    field_mapping = _build_field_mapping(
+        body.delegation_token, body.internal_mandate_id
+    )
     rules_summary = [
-        {"rule": r.rule, "passed": r.passed, "reason": r.reason}
-        for r in decision.rules
+        {"rule": r.rule, "passed": r.passed, "reason": r.reason} for r in decision.rules
     ]
 
     # 6a. BLOCK
@@ -274,26 +345,30 @@ def uap_intent(
         )
 
     # 6b. ALLOW → Razorpay test-mode order
-    rz = razorpay.Client(auth=(
-        merchant.razorpay_key_id,
-        merchant.razorpay_key_secret,
-    ))
-    order = rz.order.create({
-        "amount":   int(body.amount_inr * 100),
-        "currency": merchant.currency,
-        "receipt":  f"uap_{body.nonce[:16]}",
-        "notes": {
-            "mandate_id":       body.internal_mandate_id,
-            "delegation_id":    body.delegation_token.delegation_id,
-            "agent_registry_id": body.delegation_token.agent_registry_id,
-            "delegator_vpa":    body.delegation_token.delegator_vpa,
-            "merchant_vpa":     body.delegation_token.merchant_vpa,
-            "category":         body.category,
-            "protocol":         "uap-trustrail-v1",
-            "execution_token":  decision.execution_token,
-            "merchant_id":      merchant.merchant_id,
-        },
-    })
+    rz = razorpay.Client(
+        auth=(
+            merchant.razorpay_key_id,
+            merchant.razorpay_key_secret,
+        )
+    )
+    order = rz.order.create(
+        {
+            "amount": int(body.amount_inr * 100),
+            "currency": merchant.currency,
+            "receipt": f"uap_{body.nonce[:16]}",
+            "notes": {
+                "mandate_id": body.internal_mandate_id,
+                "delegation_id": body.delegation_token.delegation_id,
+                "agent_registry_id": body.delegation_token.agent_registry_id,
+                "delegator_vpa": body.delegation_token.delegator_vpa,
+                "merchant_vpa": body.delegation_token.merchant_vpa,
+                "category": body.category,
+                "protocol": "uap-trustrail-v1",
+                "execution_token": decision.execution_token,
+                "merchant_id": merchant.merchant_id,
+            },
+        }
+    )
 
     return UAPIntentResponse(
         status="approved",

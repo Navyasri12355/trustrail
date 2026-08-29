@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/.well-known/ucp")
-def ucp_manifest(merchant = Depends(get_merchant_from_header)):  # noqa: B008
+def ucp_manifest(merchant=Depends(get_merchant_from_header)):
     """
     UCP-style manifest. Agents discover this endpoint to learn what the merchant
     sells, which categories are available, and that mandate-scoped payment is required.
@@ -21,37 +21,37 @@ def ucp_manifest(merchant = Depends(get_merchant_from_header)):  # noqa: B008
     return {
         "schema_version": "ucp-1.0",
         "merchant": {
-            "id":       merchant.merchant_id,
-            "name":     merchant.merchant_name,
+            "id": merchant.merchant_id,
+            "name": merchant.merchant_name,
             "currency": merchant.currency,
         },
         "catalog": {
             "categories": [
                 {
-                    "id":          "groceries",
-                    "label":       "Groceries",
+                    "id": "groceries",
+                    "label": "Groceries",
                     "description": "Fresh produce, packaged food, dairy",
                     "max_item_price_inr": 2000,
                 },
                 {
-                    "id":          "household",
-                    "label":       "Household",
+                    "id": "household",
+                    "label": "Household",
                     "description": "Cleaning supplies, kitchen essentials",
                     "max_item_price_inr": 5000,
                 },
                 {
-                    "id":          "electronics",
-                    "label":       "Electronics",
+                    "id": "electronics",
+                    "label": "Electronics",
                     "description": "Gadgets, accessories, cables",
                     "max_item_price_inr": 15000,
                 },
             ]
         },
         "capabilities": {
-            "mandate_required":    True,
+            "mandate_required": True,
             "supported_protocols": ["ucp-1.0", "ap2-draft", "uap-ready"],
-            "guardrail_endpoint":  "/pay",
-            "mandate_endpoint":    "/mandates",
-            "audit_endpoint":      "/audit-log",
+            "guardrail_endpoint": "/pay",
+            "mandate_endpoint": "/mandates",
+            "audit_endpoint": "/audit-log",
         },
     }

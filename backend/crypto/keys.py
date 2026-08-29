@@ -6,8 +6,10 @@ The hex values go in your .env as ED25519_PRIVATE_KEY_HEX / ED25519_PUBLIC_KEY_H
 """
 
 import os
-import nacl.signing
+
 import nacl.encoding
+import nacl.exceptions
+import nacl.signing
 
 
 def get_signing_key() -> nacl.signing.SigningKey:
@@ -45,19 +47,19 @@ def verify_signature(payload_bytes: bytes, signature_str: str) -> bool:
     try:
         if not signature_str.startswith("ed25519:"):
             return False
-        sig_hex = signature_str[len("ed25519:"):]
+        sig_hex = signature_str[len("ed25519:") :]
         sig_bytes = bytes.fromhex(sig_hex)
         verify_key = get_verify_key()
         verify_key.verify(payload_bytes, sig_bytes)
         return True
-    except Exception:
+    except (nacl.exceptions.BadSignatureError, ValueError):
         return False
 
 
 if __name__ == "__main__":
     # Generate and print a fresh keypair
     signing_key = nacl.signing.SigningKey.generate()
-    verify_key  = signing_key.verify_key
+    verify_key = signing_key.verify_key
     print("Add these to your .env file:")
     print(f"ED25519_PRIVATE_KEY_HEX={signing_key.encode().hex()}")
     print(f"ED25519_PUBLIC_KEY_HEX={verify_key.encode().hex()}")

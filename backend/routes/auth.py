@@ -24,6 +24,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 # ── Request / Response schemas ───────────────────────────────────────────────
 
+
 class LoginRequest(BaseModel):
     username: str = Field(..., example="admin")
     password: str = Field(..., example="your-dashboard-password")
@@ -36,6 +37,7 @@ class TokenResponse(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
@@ -51,14 +53,12 @@ def login(request: Request, body: LoginRequest):
     if body.username != DEFAULT_ADMIN_USERNAME or not password_ok:
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    access_token = create_access_token(
-        data={"sub": body.username, "role": "admin"}
-    )
+    access_token = create_access_token(data={"sub": body.username, "role": "admin"})
 
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
 
@@ -78,6 +78,7 @@ def verify_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 
 # ── Dependency for protected routes ───────────────────────────────────────────
+
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """

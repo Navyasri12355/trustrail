@@ -7,64 +7,70 @@ MandateRequest format, runs the guardrail, and returns a UCP-compatible response
 Adapter is intentionally thin — zero business logic, just shape translation.
 """
 
+import json
+from datetime import datetime, timedelta, timezone
+
+import razorpay
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from typing import Optional
-import json
-from datetime import datetime, timedelta
 
 from backend.db.database import get_db
-from backend.db.models import Mandate, AuditLog, Merchant
-from backend.guardrail.engine import MandateData, PaymentRequest, validate
-from backend.guardrail import audit as audit_writer
+from backend.db.models import AuditLog, Mandate, Merchant
 from backend.dependencies.tenant import get_merchant_from_header
-from sqlalchemy import func
+from backend.guardrail import audit as audit_writer
+from backend.guardrail.engine import MandateData, PaymentRequest, validate
 
 router = APIRouter(prefix="/adapters/ucp", tags=["adapters"])
 
 
 # ── UCP-shaped request schema ─────────────────────────────────────────────────
 
+
 class UCPBuyerAgent(BaseModel):
-    agent_id:  str = Field(..., example="agent_shopping_bot_v1")
-    user_id:   str = Field(..., example="usr_123")
+    agent_id: str = Field(..., example="agent_shopping_bot_v1")
+    user_id: str = Field(..., example="usr_123")
 
 
 class UCPCatalogItem(BaseModel):
-    category:    str   = Field(..., example="groceries")
-    item_name:   str   = Field(..., example="Organic Oats 1kg")
-    amount_inr:  float = Field(..., gt=0, example=299.0)
+    category: str = Field(..., example="groceries")
+    item_name: str = Field(..., example="Organic Oats 1kg")
+    amount_inr: float = Field(..., gt=0, example=299.0)
 
 
 class UCPCheckoutRequest(BaseModel):
     """UCP-style checkout call shape."""
-    mandate_id:  str          = Field(..., example="mnd_abc123")
+
+    mandate_id: str = Field(..., example="mnd_abc123")
     buyer_agent: UCPBuyerAgent
-    item:        UCPCatalogItem
-    nonce:       str          = Field(..., example="ucp_nonce_001")
-    merchant_id: Optional[str] = None
+    item: UCPCatalogItem
+    nonce: str = Field(..., example="ucp_nonce_001")
+    merchant_id: str | None = None
 
 
 # ── UCP-shaped response schema ────────────────────────────────────────────────
 
+
 class UCPCheckoutResponse(BaseModel):
-    status:            str          # "approved" | "blocked"
-    ucp_version:       str = "ucp-1.0"
-    mandate_id:        str
-    decision_reason:   str
-    razorpay_order_id: Optional[str] = None
-    execution_token:   Optional[str] = None
-    rules_summary:     list
+    status: str  # "approved" | "blocked"
+    ucp_version: str = "ucp-1.0"
+    mandate_id: str
+    decision_reason: str
+    razorpay_order_id: str | None = None
+    execution_token: str | None = None
+    rules_summary: list
 
 
 # ── Helpers (shared with pay.py — avoid circular import by inlining) ──────────
 
+
 def _load_mandate(db: Session, mandate_id: str, merchant_id: str) -> Mandate:
-    m = db.query(Mandate).filter(
-        Mandate.mandate_id == mandate_id,
-        Mandate.merchant_id == merchant_id
-    ).first()
+    m = (
+        db.query(Mandate)
+        .filter(Mandate.mandate_id == mandate_id, Mandate.merchant_id == merchant_id)
+        .first()
+    )
     if not m:
         raise HTTPException(status_code=404, detail=f"Mandate {mandate_id} not found")
     return m
@@ -89,13 +95,13 @@ def _to_mandate_data(m: Mandate) -> MandateData:
 
 
 def _get_spent_7d(db: Session, mandate_id: str, merchant_id: str) -> float:
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=7)
     result = (
         db.query(func.sum(AuditLog.amount))
         .filter(
             AuditLog.mandate_id == mandate_id,
             AuditLog.merchant_id == merchant_id,
-            AuditLog.decision   == "ALLOW",
+            AuditLog.decision == "ALLOW",
             AuditLog.created_at >= cutoff,
         )
         .scalar()
@@ -109,7 +115,7 @@ def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str):
         .filter(
             AuditLog.mandate_id == mandate_id,
             AuditLog.merchant_id == merchant_id,
-            AuditLog.nonce.isnot(None)
+            AuditLog.nonce.isnot(None),
         )
         .all()
     )
@@ -118,11 +124,12 @@ def _get_seen_nonces(db: Session, mandate_id: str, merchant_id: str):
 
 # ── Route ─────────────────────────────────────────────────────────────────────
 
+
 @router.post("/checkout", response_model=UCPCheckoutResponse)
 def ucp_checkout(
     body: UCPCheckoutRequest,
     merchant: Merchant = Depends(get_merchant_from_header),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Story-10: UCP adapter.
@@ -131,7 +138,7 @@ def ucp_checkout(
     Enforces tenant isolation.
     """
     # ── Shape translation (UCP → internal) ───────────────────────────────────
-    mandate_row  = _load_mandate(db, body.mandate_id, merchant.merchant_id)
+    mandate_row = _load_mandate(db, body.mandate_id, merchant.merchant_id)
     mandate_data = _to_mandate_data(mandate_row)
 
     payment_req = PaymentRequest(
@@ -143,7 +150,7 @@ def ucp_checkout(
     )
 
     # ── Guardrail ─────────────────────────────────────────────────────────────
-    spent_7d    = _get_spent_7d(db, body.mandate_id, merchant.merchant_id)
+    spent_7d = _get_spent_7d(db, body.mandate_id, merchant.merchant_id)
     seen_nonces = _get_seen_nonces(db, body.mandate_id, merchant.merchant_id)
 
     decision = validate(
@@ -164,8 +171,7 @@ def ucp_checkout(
     )
 
     rules_summary = [
-        {"rule": r.rule, "passed": r.passed, "reason": r.reason}
-        for r in decision.rules
+        {"rule": r.rule, "passed": r.passed, "reason": r.reason} for r in decision.rules
     ]
 
     # ── BLOCK ─────────────────────────────────────────────────────────────────
@@ -178,24 +184,27 @@ def ucp_checkout(
         )
 
     # ── ALLOW → Razorpay ──────────────────────────────────────────────────────
-    import razorpay
-    rz = razorpay.Client(auth=(
-        merchant.razorpay_key_id,
-        merchant.razorpay_key_secret,
-    ))
-    order = rz.order.create({
-        "amount":   int(body.item.amount_inr * 100),
-        "currency": merchant.currency,
-        "receipt":  f"ucp_{body.nonce[:16]}",
-        "notes": {
-            "mandate_id":      body.mandate_id,
-            "agent_id":        body.buyer_agent.agent_id,
-            "category":        body.item.category,
-            "protocol":        "ucp-1.0",
-            "execution_token": decision.execution_token,
-            "merchant_id":     merchant.merchant_id,
-        },
-    })
+    rz = razorpay.Client(
+        auth=(
+            merchant.razorpay_key_id,
+            merchant.razorpay_key_secret,
+        )
+    )
+    order = rz.order.create(
+        {
+            "amount": int(body.item.amount_inr * 100),
+            "currency": merchant.currency,
+            "receipt": f"ucp_{body.nonce[:16]}",
+            "notes": {
+                "mandate_id": body.mandate_id,
+                "agent_id": body.buyer_agent.agent_id,
+                "category": body.item.category,
+                "protocol": "ucp-1.0",
+                "execution_token": decision.execution_token,
+                "merchant_id": merchant.merchant_id,
+            },
+        }
+    )
 
     return UCPCheckoutResponse(
         status="approved",
