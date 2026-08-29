@@ -8,7 +8,10 @@ import pytest
 
 # Skip API tests for now - they require full app initialization
 # which has rate limiter dependencies that don't work well in test context
-pytest.skip("API tests require full FastAPI app with rate limiter setup", allow_module_level=True)
+pytest.skip(
+    "API tests require full FastAPI app with rate limiter setup",
+    allow_module_level=True,
+)
 
 
 @pytest.fixture

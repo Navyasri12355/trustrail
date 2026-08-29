@@ -11,8 +11,12 @@ from sqlalchemy.orm import sessionmaker
 
 # Set test environment variables before importing backend modules
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
-os.environ["ED25519_PRIVATE_KEY_HEX"] = "0000000000000000000000000000000000000000000000000000000000000001"
-os.environ["ED25519_PUBLIC_KEY_HEX"] = "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29"
+os.environ["ED25519_PRIVATE_KEY_HEX"] = (
+    "0000000000000000000000000000000000000000000000000000000000000001"
+)
+os.environ["ED25519_PUBLIC_KEY_HEX"] = (
+    "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29"
+)
 os.environ["JWT_SECRET_KEY"] = "test_secret_key_for_ci_min_32_chars_long"
 os.environ["DASHBOARD_ADMIN_USERNAME"] = "admin"
 os.environ["DASHBOARD_ADMIN_PASSWORD"] = "admin123"
@@ -59,7 +63,9 @@ def sample_mandate_data():
         "max_rolling_7d": 2000.0,
         "currency": "INR",
     }
-    payload_bytes = json.dumps(mandate_payload, sort_keys=True, separators=(",", ":")).encode()
+    payload_bytes = json.dumps(
+        mandate_payload, sort_keys=True, separators=(",", ":")
+    ).encode()
     signature = sign_payload(payload_bytes)
 
     return MandateData(

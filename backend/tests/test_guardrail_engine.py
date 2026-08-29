@@ -190,12 +190,11 @@ class TestRuleNoReplay:
 class TestValidateIntegration:
     """Integration tests for the validate function."""
 
-    def test_all_rules_pass(
-        self, sample_mandate_data, sample_payment_request
-    ):
+    def test_all_rules_pass(self, sample_mandate_data, sample_payment_request):
         """Should return ALLOW when all rules pass (except signature which is mocked)."""
         # Mock the signature rule to always pass for integration tests
         from backend.guardrail import engine
+
         original_rule = engine._rule_signature_valid
         engine._rule_signature_valid = lambda m: engine.RuleResult(
             rule="signature_valid", passed=True, reason=""
@@ -216,12 +215,11 @@ class TestValidateIntegration:
         finally:
             engine._rule_signature_valid = original_rule
 
-    def test_category_blocks(
-        self, sample_mandate_data, sample_payment_request
-    ):
+    def test_category_blocks(self, sample_mandate_data, sample_payment_request):
         """Should return BLOCK when category is out of scope."""
         # Mock the signature rule to always pass for integration tests
         from backend.guardrail import engine
+
         original_rule = engine._rule_signature_valid
         engine._rule_signature_valid = lambda m: engine.RuleResult(
             rule="signature_valid", passed=True, reason=""
@@ -241,12 +239,11 @@ class TestValidateIntegration:
         finally:
             engine._rule_signature_valid = original_rule
 
-    def test_all_rules_evaluated(
-        self, sample_mandate_data, sample_payment_request
-    ):
+    def test_all_rules_evaluated(self, sample_mandate_data, sample_payment_request):
         """Should evaluate all 7 rules even when early rules fail."""
         # Mock the signature rule to always pass for integration tests
         from backend.guardrail import engine
+
         original_rule = engine._rule_signature_valid
         engine._rule_signature_valid = lambda m: engine.RuleResult(
             rule="signature_valid", passed=True, reason=""
